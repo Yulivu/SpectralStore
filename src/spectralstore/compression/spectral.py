@@ -18,6 +18,7 @@ class SpectralCompressionConfig:
     rank: int = 8
     residual_threshold: float | None = None
     random_seed: int = 0
+    num_splits: int = 1
 
 
 class AsymmetricSpectralCompressor:
@@ -32,15 +33,20 @@ class AsymmetricSpectralCompressor:
             raise ValueError("at least two temporal snapshots are required")
 
         rng = np.random.default_rng(self.config.random_seed)
-        order = rng.permutation(dense.shape[0])
-        split = max(1, dense.shape[0] // 2)
-        first = dense[order[:split]].mean(axis=0)
-        second = dense[order[split:]].mean(axis=0)
-        if order[split:].size == 0:
-            second = first
+        stitched = np.zeros(dense.shape[1:], dtype=float)
+        num_splits = max(1, self.config.num_splits)
+        for _ in range(num_splits):
+            order = rng.permutation(dense.shape[0])
+            split = max(1, dense.shape[0] // 2)
+            first = dense[order[:split]].mean(axis=0)
+            second = dense[order[split:]].mean(axis=0)
+            if order[split:].size == 0:
+                second = first
 
-        stitched = np.triu(first) + np.tril(second, k=-1)
-        np.fill_diagonal(stitched, 0.5 * (np.diag(first) + np.diag(second)))
+            split_stitched = np.triu(first) + np.tril(second, k=-1)
+            np.fill_diagonal(split_stitched, 0.5 * (np.diag(first) + np.diag(second)))
+            stitched += split_stitched
+        stitched /= num_splits
         return _factorize_from_basis(dense, stitched, self.config)
 
 

@@ -1,0 +1,13 @@
+{
+  "num_nodes": 300,
+  "num_steps": 20,
+  "num_communities": 5,
+  "p_in": 0.3,
+  "p_out": 0.05,
+  "temporal_jitter": 0.08,
+  "directed": true,
+  "rank": 5,
+  "num_splits": 8,
+  "num_repeats": 10,
+  "random_seed": 17
+}

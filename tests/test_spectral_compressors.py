@@ -15,7 +15,7 @@ def test_spectral_compressors_fit_temporal_snapshots() -> None:
         rank=3,
         random_seed=5,
     )
-    config = SpectralCompressionConfig(rank=3, random_seed=5)
+    config = SpectralCompressionConfig(rank=3, random_seed=5, num_splits=3)
 
     for compressor_cls in [
         AsymmetricSpectralCompressor,

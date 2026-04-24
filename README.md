@@ -75,15 +75,25 @@ python scripts/run_preliminary_bitcoin.py
 
 Results are written under `experiments/preliminary/bitcoin_otc/results/`.
 
+Run the preliminary Synthetic-SBM comparison:
+
+```bash
+python scripts/run_preliminary_synthetic_sbm.py
+```
+
+Results are written under `experiments/preliminary/synthetic_sbm/results/`.
+
 ## Status
 
 This repository is in the initial implementation phase. It currently includes:
 
 - a factorized temporal store,
 - an asymmetric spectral compressor,
+- multi-split asymmetric spectral ensembling,
 - SymSVD and DirectSVD baselines,
 - Bitcoin-OTC loading,
-- smoke tests and a preliminary real-data experiment.
+- Synthetic-SBM generation,
+- smoke tests, a preliminary real-data experiment, and a preliminary synthetic experiment.
 
 ## License
 
