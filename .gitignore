@@ -16,13 +16,25 @@ build/
 dist/
 
 # Experiments and data
-data/
+data/raw/*
+data/interim/*
+data/processed/*
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+experiments/**/results/*
+!experiments/**/results/.gitkeep
 outputs/
 mlruns/
 wandb/
 *.npy
 *.npz
 *.pkl
+*.csv
+*.csv.gz
+*.json
+!experiments/**/README.md
+!experiments/**/configs/*.json
 
 # Editors and OS
 .idea/

@@ -29,6 +29,13 @@ and evaluation plan.
 ## Repository Layout
 
 ```text
+data/
+  raw/        Original downloaded datasets, ignored by Git
+  interim/    Temporary conversions, ignored by Git
+  processed/  Stable derived artifacts, ignored by Git
+scripts/      Dataset download and experiment entry points
+experiments/  Experiment configs, notes, and result folders
+tests/smoke/  End-to-end smoke tests on tiny inputs
 src/spectralstore/
   compression/      Compression algorithms and factorized stores
   query_engine/     Query execution over compressed representations
@@ -37,7 +44,6 @@ src/spectralstore/
   evaluation/       Metrics and experiment helpers
   baselines/        Baseline method wrappers
 tests/              Unit tests
-docs/               Extra documentation
 ```
 
 ## Quick Start
@@ -49,10 +55,35 @@ python -m pip install -e ".[dev]"
 pytest
 ```
 
+Run the tiny smoke experiment:
+
+```bash
+python scripts/run_smoke_quickstart.py
+```
+
+Download the first real dataset:
+
+```bash
+python scripts/download_dataset.py bitcoin_otc
+```
+
+Run the preliminary Bitcoin-OTC comparison:
+
+```bash
+python scripts/run_preliminary_bitcoin.py
+```
+
+Results are written under `experiments/preliminary/bitcoin_otc/results/`.
+
 ## Status
 
-This repository is in the initial project setup phase. The first milestone is a
-minimal compressed store and query engine for synthetic temporal graphs.
+This repository is in the initial implementation phase. It currently includes:
+
+- a factorized temporal store,
+- an asymmetric spectral compressor,
+- SymSVD and DirectSVD baselines,
+- Bitcoin-OTC loading,
+- smoke tests and a preliminary real-data experiment.
 
 ## License
 
