@@ -83,6 +83,14 @@ python scripts/run_preliminary_synthetic_sbm.py
 
 Results are written under `experiments/preliminary/synthetic_sbm/results/`.
 
+Run the preliminary Synthetic-Attack robust residual comparison:
+
+```bash
+python scripts/run_preliminary_synthetic_attack.py
+```
+
+Results are written under `experiments/preliminary/synthetic_attack/results/`.
+
 ## Status
 
 This repository is in the initial implementation phase. It currently includes:
@@ -90,10 +98,13 @@ This repository is in the initial implementation phase. It currently includes:
 - a factorized temporal store,
 - an asymmetric spectral compressor,
 - multi-split asymmetric spectral ensembling,
+- a first robust residual compressor,
 - SymSVD and DirectSVD baselines,
 - Bitcoin-OTC loading,
-- Synthetic-SBM generation,
-- smoke tests, a preliminary real-data experiment, and a preliminary synthetic experiment.
+- Synthetic-SBM and Synthetic-Attack generation,
+- smoke tests, preliminary real-data experiments, and preliminary synthetic experiments.
+
+The implementation roadmap is tracked in [docs/TECHNICAL_ROADMAP.md](docs/TECHNICAL_ROADMAP.md).
 
 ## License
 

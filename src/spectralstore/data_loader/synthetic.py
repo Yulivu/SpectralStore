@@ -13,6 +13,8 @@ class SyntheticTemporalGraph:
     snapshots: list[sparse.csr_matrix]
     expected_snapshots: list[np.ndarray]
     communities: np.ndarray
+    attack_edges: tuple[tuple[int, int, int], ...] = ()
+    attack_kind: str | None = None
 
 
 def make_low_rank_temporal_graph(
@@ -84,3 +86,98 @@ def make_temporal_sbm(
         expected_snapshots=expected_snapshots,
         communities=communities,
     )
+
+
+def make_synthetic_attack(
+    *,
+    num_nodes: int = 300,
+    num_steps: int = 20,
+    num_communities: int = 5,
+    p_in: float = 0.30,
+    p_out: float = 0.05,
+    temporal_jitter: float = 0.08,
+    attack_kind: str = "sparse_outlier_edges",
+    attack_fraction: float = 0.02,
+    outlier_weight: float = 3.0,
+    directed: bool = True,
+    random_seed: int = 0,
+) -> SyntheticTemporalGraph:
+    """Generate a temporal SBM and inject sparse attacks into observed snapshots."""
+
+    clean = make_temporal_sbm(
+        num_nodes=num_nodes,
+        num_steps=num_steps,
+        num_communities=num_communities,
+        p_in=p_in,
+        p_out=p_out,
+        temporal_jitter=temporal_jitter,
+        directed=directed,
+        random_seed=random_seed,
+    )
+    rng = np.random.default_rng(random_seed + 10_000)
+    possible_pairs = _candidate_pairs(clean.communities, attack_kind, directed=directed)
+    attacks_per_step = max(1, int(round(attack_fraction * len(possible_pairs))))
+    attacked_snapshots: list[sparse.csr_matrix] = []
+    attack_edges: list[tuple[int, int, int]] = []
+
+    for t, snapshot in enumerate(clean.snapshots):
+        dense = snapshot.toarray().astype(float, copy=True)
+        chosen = _sample_pairs(rng, possible_pairs, attacks_per_step)
+        for u, v in chosen:
+            if attack_kind == "random_flip":
+                dense[u, v] = 1.0 - dense[u, v]
+            elif attack_kind == "targeted_cross_community":
+                dense[u, v] = 1.0
+            elif attack_kind == "sparse_outlier_edges":
+                dense[u, v] = outlier_weight
+            else:
+                raise ValueError(f"unsupported attack_kind: {attack_kind}")
+            attack_edges.append((t, int(u), int(v)))
+
+            if not directed:
+                dense[v, u] = dense[u, v]
+                attack_edges.append((t, int(v), int(u)))
+
+        attacked_snapshots.append(sparse.csr_matrix(dense))
+
+    return SyntheticTemporalGraph(
+        snapshots=attacked_snapshots,
+        expected_snapshots=clean.expected_snapshots,
+        communities=clean.communities,
+        attack_edges=tuple(attack_edges),
+        attack_kind=attack_kind,
+    )
+
+
+def _candidate_pairs(
+    communities: np.ndarray,
+    attack_kind: str,
+    *,
+    directed: bool,
+) -> np.ndarray:
+    num_nodes = communities.shape[0]
+    row, col = np.where(~np.eye(num_nodes, dtype=bool))
+    if not directed:
+        keep = row < col
+        row = row[keep]
+        col = col[keep]
+
+    if attack_kind == "targeted_cross_community":
+        keep = communities[row] != communities[col]
+        row = row[keep]
+        col = col[keep]
+    elif attack_kind not in {"random_flip", "sparse_outlier_edges"}:
+        raise ValueError(f"unsupported attack_kind: {attack_kind}")
+
+    return np.column_stack([row, col])
+
+
+def _sample_pairs(
+    rng: np.random.Generator,
+    pairs: np.ndarray,
+    count: int,
+) -> np.ndarray:
+    if count >= len(pairs):
+        return pairs.copy()
+    indices = rng.choice(len(pairs), size=count, replace=False)
+    return pairs[indices]

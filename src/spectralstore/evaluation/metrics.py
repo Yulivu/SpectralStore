@@ -95,3 +95,36 @@ def relative_frobenius_error_against_dense(
         numerator += float(np.sum((expected - reconstruction) ** 2))
         denominator += float(np.sum(expected**2))
     return float(np.sqrt(numerator / max(denominator, 1e-12)))
+
+
+def residual_nnz(store: FactorizedTemporalStore) -> int:
+    return int(sum(residual.nnz for residual in store.residuals))
+
+
+def residual_sparsity(store: FactorizedTemporalStore) -> float:
+    if not store.residuals:
+        return 0.0
+    total_entries = sum(residual.shape[0] * residual.shape[1] for residual in store.residuals)
+    return float(residual_nnz(store) / max(total_entries, 1))
+
+
+def anomaly_precision_recall(
+    attack_edges: tuple[tuple[int, int, int], ...],
+    store: FactorizedTemporalStore,
+) -> tuple[float, float]:
+    truth = set(attack_edges)
+    predicted: set[tuple[int, int, int]] = set()
+    for t, residual in enumerate(store.residuals):
+        coo = residual.tocoo()
+        predicted.update((t, int(row), int(col)) for row, col in zip(coo.row, coo.col))
+
+    if not predicted:
+        precision = 0.0
+    else:
+        precision = len(predicted & truth) / len(predicted)
+
+    if not truth:
+        recall = 0.0
+    else:
+        recall = len(predicted & truth) / len(truth)
+    return float(precision), float(recall)
