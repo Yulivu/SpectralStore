@@ -1,0 +1,64 @@
+"""Query engine for factorized temporal graph stores."""
+
+from __future__ import annotations
+
+import numpy as np
+
+from spectralstore.compression import FactorizedTemporalStore
+
+
+class QueryEngine:
+    """Execute first-milestone queries over a factorized store."""
+
+    def __init__(self, store: FactorizedTemporalStore) -> None:
+        self.store = store
+
+    def link_prob(self, u: int, v: int, t: int, *, include_residual: bool = True) -> float:
+        return self.store.link_score(u, v, t, include_residual=include_residual)
+
+    def top_neighbor(
+        self,
+        u: int,
+        t: int,
+        k: int,
+        *,
+        include_residual: bool = False,
+        exclude_self: bool = True,
+    ) -> list[tuple[int, float]]:
+        if k <= 0:
+            return []
+
+        scores = self.store.dense_snapshot(t, include_residual=include_residual)[u].copy()
+        if exclude_self and 0 <= u < scores.shape[0]:
+            scores[u] = -np.inf
+
+        limit = min(k, scores.shape[0])
+        candidate_indices = np.argpartition(-scores, limit - 1)[:limit]
+        ordered = candidate_indices[np.argsort(-scores[candidate_indices])]
+        return [(int(idx), float(scores[idx])) for idx in ordered]
+
+    def temporal_trend(
+        self,
+        u: int,
+        v: int,
+        t1: int,
+        t2: int,
+        *,
+        include_residual: bool = True,
+    ) -> list[float]:
+        if t1 > t2:
+            raise ValueError("t1 must be less than or equal to t2")
+        return [
+            self.store.link_score(u, v, t, include_residual=include_residual)
+            for t in range(t1, t2 + 1)
+        ]
+
+    def anomaly_detect(self, t: int, threshold: float) -> list[tuple[int, int, float]]:
+        if not self.store.residuals:
+            return []
+        matrix = self.store.residuals[t].tocoo()
+        keep = np.abs(matrix.data) > threshold
+        return [
+            (int(row), int(col), float(value))
+            for row, col, value in zip(matrix.row[keep], matrix.col[keep], matrix.data[keep])
+        ]
