@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from scipy import sparse
@@ -20,6 +21,8 @@ class SpectralCompressionConfig:
     residual_threshold_mode: str = "mad"
     residual_quantile: float = 0.98
     residual_mad_multiplier: float = 45.0
+    residual_hybrid_tail_quantile: float = 0.95
+    residual_hybrid_tail_ratio: float = 2.0
     robust_iterations: int = 1
     random_seed: int = 0
     num_splits: int = 1
@@ -55,18 +58,20 @@ class RobustAsymmetricSpectralCompressor:
             basis = _asymmetric_basis(cleaned, self.config)
             store = _factorize_from_basis(cleaned, basis, self.config, residuals=())
             residual_stack = _residual_stack(dense, store)
-            sparse_residuals = _threshold_residuals(residual_stack, self.config)
+            sparse_residuals, _ = _threshold_residuals(residual_stack, self.config)
             cleaned = dense - np.stack([residual.toarray() for residual in sparse_residuals])
 
         basis = _asymmetric_basis(cleaned, self.config)
         final_store = _factorize_from_basis(cleaned, basis, self.config, residuals=())
-        final_residuals = _threshold_residuals(_residual_stack(dense, final_store), self.config)
+        final_residual_stack = _residual_stack(dense, final_store)
+        final_residuals, diagnostics = _threshold_residuals(final_residual_stack, self.config)
         return FactorizedTemporalStore(
             left=final_store.left,
             right=final_store.right,
             temporal=final_store.temporal,
             lambdas=final_store.lambdas,
             residuals=final_residuals,
+            threshold_diagnostics=diagnostics,
         )
 
 
@@ -97,7 +102,10 @@ class DirectSVDCompressor:
 def _as_dense_stack(snapshots: list[ArrayLikeSnapshot]) -> np.ndarray:
     if not snapshots:
         raise ValueError("snapshots cannot be empty")
-    dense = [snapshot.toarray() if sparse.issparse(snapshot) else np.asarray(snapshot) for snapshot in snapshots]
+    dense = [
+        snapshot.toarray() if sparse.issparse(snapshot) else np.asarray(snapshot)
+        for snapshot in snapshots
+    ]
     return np.stack(dense).astype(float, copy=False)
 
 
@@ -168,32 +176,79 @@ def _residual_stack(dense_snapshots: np.ndarray, store: FactorizedTemporalStore)
 def _threshold_residuals(
     residual_stack: np.ndarray,
     config: SpectralCompressionConfig,
-) -> tuple[sparse.csr_matrix, ...]:
+) -> tuple[tuple[sparse.csr_matrix, ...], dict[str, Any]]:
     if config.residual_threshold is None:
-        threshold = _adaptive_residual_threshold(residual_stack, config)
+        threshold, diagnostics = _adaptive_residual_threshold(residual_stack, config)
     else:
-        threshold = config.residual_threshold
+        threshold = float(config.residual_threshold)
+        diagnostics = {
+            "mode": "fixed",
+            "estimated_threshold": threshold,
+            "noise_scale": 0.0,
+            "mad_sigma": 0.0,
+            "residual_center": 0.0,
+            "residual_mad": 0.0,
+            "quantile_threshold": threshold,
+            "hybrid_cap_active": False,
+        }
 
     residual_matrices = []
     for residual in residual_stack:
         separated = residual.copy()
         separated[np.abs(separated) < threshold] = 0.0
         residual_matrices.append(sparse.csr_matrix(separated))
-    return tuple(residual_matrices)
+    residuals = tuple(residual_matrices)
+    nnz = int(sum(residual.nnz for residual in residuals))
+    total_entries = int(sum(residual.shape[0] * residual.shape[1] for residual in residuals))
+    diagnostics = {
+        **diagnostics,
+        "estimated_threshold": threshold,
+        "residual_nnz": nnz,
+        "residual_sparsity": float(nnz / max(total_entries, 1)),
+    }
+    return residuals, diagnostics
 
 
 def _adaptive_residual_threshold(
     residual_stack: np.ndarray,
     config: SpectralCompressionConfig,
-) -> float:
+) -> tuple[float, dict[str, Any]]:
+    abs_residuals = np.abs(residual_stack).ravel()
+    center = float(np.median(abs_residuals))
+    mad = float(np.median(np.abs(abs_residuals - center)))
+    sigma = float(1.4826 * mad)
+    quantile_threshold = float(np.quantile(abs_residuals, config.residual_quantile))
+    tail_threshold = float(np.quantile(abs_residuals, config.residual_hybrid_tail_quantile))
+    if sigma <= 1e-12:
+        mad_threshold = float(np.max(abs_residuals) + 1.0)
+    else:
+        mad_threshold = float(center + config.residual_mad_multiplier * sigma)
+
+    diagnostics: dict[str, Any] = {
+        "mode": config.residual_threshold_mode,
+        "noise_scale": sigma,
+        "mad_sigma": sigma,
+        "residual_center": center,
+        "residual_mad": mad,
+        "mad_threshold": mad_threshold,
+        "quantile_threshold": quantile_threshold,
+        "tail_quantile": config.residual_hybrid_tail_quantile,
+        "tail_threshold": tail_threshold,
+        "tail_ratio": float(quantile_threshold / max(tail_threshold, 1e-12)),
+        "hybrid_cap_active": False,
+    }
+
     if config.residual_threshold_mode == "quantile":
-        return float(np.quantile(np.abs(residual_stack), config.residual_quantile))
+        return quantile_threshold, diagnostics
     if config.residual_threshold_mode == "mad":
-        abs_residuals = np.abs(residual_stack).ravel()
-        center = float(np.median(abs_residuals))
-        mad = float(np.median(np.abs(abs_residuals - center)))
-        sigma = 1.4826 * mad
-        if sigma <= 1e-12:
-            return float(np.max(np.abs(residual_stack)) + 1.0)
-        return float(center + config.residual_mad_multiplier * sigma)
+        return mad_threshold, diagnostics
+    if config.residual_threshold_mode == "hybrid":
+        cap_active = (
+            mad_threshold > quantile_threshold
+            and quantile_threshold > config.residual_hybrid_tail_ratio * max(tail_threshold, 1e-12)
+        )
+        diagnostics["hybrid_cap_active"] = cap_active
+        if cap_active:
+            return quantile_threshold, diagnostics
+        return mad_threshold, diagnostics
     raise ValueError(f"unsupported residual_threshold_mode: {config.residual_threshold_mode}")

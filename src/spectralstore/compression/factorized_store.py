@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from scipy import sparse
@@ -22,6 +23,7 @@ class FactorizedTemporalStore:
     temporal: np.ndarray
     lambdas: np.ndarray
     residuals: tuple[sparse.csr_matrix, ...] = ()
+    threshold_diagnostics: dict[str, Any] | None = None
 
     def __post_init__(self) -> None:
         rank = self.lambdas.shape[0]

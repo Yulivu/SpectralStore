@@ -12,14 +12,16 @@ expected to help less there. Treat those rows as a diagnostic for threshold
 policy and future attack-specific robustification, not as the final robust graph
 learning result.
 
-The sweep compares two robust residual policies:
+The sweep compares three robust residual policies:
 
-- `spectralstore_full_mad`: adaptive threshold based on the upper tail of
+- `full_mad`: adaptive threshold based on the upper tail of
   absolute residuals. This is the preferred default because it can avoid forced
   residual extraction when no attack is present.
-- `spectralstore_full_quantile`: fixed residual sparsity. This is useful for
+- `full_quantile`: fixed residual sparsity. This is useful for
   controlled comparisons, but it can over-clean normal noise when the graph is
   clean and under-clean when the attack fraction exceeds the chosen quantile.
+- `full_hybrid`: MAD first, with a quantile cap when the high tail is separated
+  enough to indicate residual-distribution contamination.
 
 Current interpretation:
 
