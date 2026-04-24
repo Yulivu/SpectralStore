@@ -3,6 +3,7 @@ from spectralstore.compression import (
     DirectSVDCompressor,
     SpectralCompressionConfig,
     SymmetricSVDCompressor,
+    TensorUnfoldingSVDCompressor,
 )
 from spectralstore.data_loader import make_low_rank_temporal_graph
 from spectralstore.evaluation import relative_frobenius_error
@@ -21,6 +22,7 @@ def test_spectral_compressors_fit_temporal_snapshots() -> None:
         AsymmetricSpectralCompressor,
         DirectSVDCompressor,
         SymmetricSVDCompressor,
+        TensorUnfoldingSVDCompressor,
     ]:
         store = compressor_cls(config).fit_transform(snapshots)
         assert store.num_nodes == 18

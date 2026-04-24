@@ -7,6 +7,7 @@ from spectralstore.compression.spectral import (
     RobustAsymmetricSpectralCompressor,
     SpectralCompressionConfig,
     SymmetricSVDCompressor,
+    TensorUnfoldingSVDCompressor,
 )
 
 __all__ = [
@@ -16,4 +17,5 @@ __all__ = [
     "RobustAsymmetricSpectralCompressor",
     "SpectralCompressionConfig",
     "SymmetricSVDCompressor",
+    "TensorUnfoldingSVDCompressor",
 ]

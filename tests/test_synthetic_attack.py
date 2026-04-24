@@ -138,6 +138,10 @@ def test_threshold_diagnostics_are_recorded() -> None:
     ):
         assert field in store.threshold_diagnostics
     assert store.threshold_diagnostics["residual_nnz"] == residual_nnz(store)
+    assert store.source_degree_scale is not None
+    assert store.target_degree_scale is not None
+    assert store.entrywise_bound_scale is not None
+    assert "degree_aware_bound_scale" in store.threshold_diagnostics
 
 
 def test_entrywise_bound_covers_fitted_snapshots() -> None:
@@ -163,6 +167,30 @@ def test_entrywise_bound_covers_fitted_snapshots() -> None:
 
     assert entrywise_bound_coverage(observed, store, include_residual=True) == 1.0
     assert entrywise_bound_coverage(observed, store, include_residual=False) == 1.0
+
+
+def test_degree_aware_bound_varies_by_node_degree() -> None:
+    dataset = make_synthetic_attack(
+        num_nodes=40,
+        num_steps=4,
+        num_communities=4,
+        attack_kind="sparse_outlier_edges",
+        attack_fraction=0.02,
+        random_seed=27,
+    )
+    store = RobustAsymmetricSpectralCompressor(
+        SpectralCompressionConfig(
+            rank=4,
+            num_splits=3,
+            residual_threshold_mode="hybrid",
+            residual_quantile=0.985,
+            robust_iterations=2,
+            random_seed=27,
+        )
+    ).fit_transform(dataset.snapshots)
+
+    assert store.source_degree_scale is not None
+    assert float(store.source_degree_scale.max()) > float(store.source_degree_scale.min())
 
 
 def test_hybrid_threshold_does_not_over_extract_without_attack() -> None:

@@ -88,6 +88,39 @@ def make_temporal_sbm(
     )
 
 
+def make_synthetic_spiked(
+    *,
+    num_nodes: int = 200,
+    num_steps: int = 10,
+    rank: int = 3,
+    snr: float = 2.0,
+    random_seed: int = 0,
+) -> SyntheticTemporalGraph:
+    """Generate a temporal spiked matrix model with Gaussian observations."""
+
+    rng = np.random.default_rng(random_seed)
+    basis, _ = np.linalg.qr(rng.normal(size=(num_nodes, rank)))
+    lambdas = np.geomspace(snr, max(snr * 0.25, 1e-3), rank)
+    expected = (basis * lambdas) @ basis.T
+    np.fill_diagonal(expected, 0.0)
+    noise_scale = 1.0
+
+    snapshots = []
+    expected_snapshots = []
+    for _t in range(num_steps):
+        noise = rng.normal(scale=noise_scale, size=expected.shape)
+        observed = expected + noise
+        np.fill_diagonal(observed, 0.0)
+        snapshots.append(sparse.csr_matrix(observed))
+        expected_snapshots.append(expected.copy())
+
+    return SyntheticTemporalGraph(
+        snapshots=snapshots,
+        expected_snapshots=expected_snapshots,
+        communities=np.zeros(num_nodes, dtype=int),
+    )
+
+
 def make_synthetic_attack(
     *,
     num_nodes: int = 300,

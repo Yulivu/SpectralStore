@@ -99,6 +99,15 @@ python scripts/run_preliminary_synthetic_attack_sweep.py
 
 Sweep results are written to `sweep_metrics.json` and `sweep_summary.md` in the same results folder.
 
+Run the Synthetic-SBM entrywise-bound scaling experiment:
+
+```bash
+python scripts/run_synthetic_sbm_bound_scaling.py
+```
+
+Bound scaling results are written to `bound_scaling_metrics.json` and
+`bound_scaling_summary.md` in the Synthetic-SBM results folder.
+
 ## Status
 
 This repository is in the initial implementation phase. It currently includes:
@@ -106,12 +115,13 @@ This repository is in the initial implementation phase. It currently includes:
 - a factorized temporal store,
 - an asymmetric spectral compressor,
 - multi-split asymmetric spectral ensembling,
+- a tensor-unfolding SVD compressor baseline,
 - a first robust residual compressor,
 - adaptive MAD, fixed-quantile, and hybrid residual threshold policies,
-- empirical entrywise error bounds for residual-corrected link and trend queries,
+- degree-aware empirical entrywise error bounds for residual-corrected link and trend queries,
 - SymSVD and DirectSVD baselines,
 - Bitcoin-OTC loading,
-- Synthetic-SBM and Synthetic-Attack generation,
+- Synthetic-SBM, Synthetic-Spiked, and Synthetic-Attack generation,
 - smoke tests, preliminary real-data experiments, and preliminary synthetic experiments.
 
 The implementation roadmap is tracked in [docs/TECHNICAL_ROADMAP.md](docs/TECHNICAL_ROADMAP.md).

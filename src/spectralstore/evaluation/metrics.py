@@ -76,20 +76,46 @@ def entrywise_bound_coverage(
     """Return the fraction of entries covered by the store's empirical bound."""
     if store.threshold_diagnostics is None:
         return float("nan")
-    threshold = store.threshold_diagnostics.get("estimated_threshold")
-    if threshold is None:
-        return float("nan")
-
     covered = 0
     total = 0
     for t, expected in enumerate(expected_snapshots):
         reconstruction = store.dense_snapshot(t, include_residual=include_residual)
-        bound = np.full(expected.shape, float(threshold), dtype=float)
-        if not include_residual and store.residuals:
-            bound += np.abs(store.residuals[t].toarray())
+        bound = store.entrywise_error_bound_matrix(t, include_residual=include_residual)
+        if bound is None:
+            return float("nan")
         covered += int(np.sum(np.abs(expected - reconstruction) <= bound + 1e-12))
         total += expected.size
     return float(covered / max(total, 1))
+
+
+def mean_entrywise_error_bound(
+    store: FactorizedTemporalStore,
+    *,
+    include_residual: bool = True,
+) -> float:
+    """Return the mean empirical entrywise bound across all stored snapshots."""
+    values = []
+    for t in range(store.num_steps):
+        bound = store.entrywise_error_bound_matrix(t, include_residual=include_residual)
+        if bound is None:
+            return float("nan")
+        values.append(float(np.mean(bound)))
+    return float(np.mean(values))
+
+
+def max_entrywise_error_bound(
+    store: FactorizedTemporalStore,
+    *,
+    include_residual: bool = True,
+) -> float:
+    """Return the max empirical entrywise bound across all stored snapshots."""
+    values = []
+    for t in range(store.num_steps):
+        bound = store.entrywise_error_bound_matrix(t, include_residual=include_residual)
+        if bound is None:
+            return float("nan")
+        values.append(float(np.max(bound)))
+    return float(np.max(values))
 
 
 def mean_entrywise_error(

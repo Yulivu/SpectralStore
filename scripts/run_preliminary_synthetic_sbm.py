@@ -18,6 +18,7 @@ from spectralstore.compression import (
     DirectSVDCompressor,
     SpectralCompressionConfig,
     SymmetricSVDCompressor,
+    TensorUnfoldingSVDCompressor,
 )
 from spectralstore.data_loader import make_temporal_sbm
 from spectralstore.evaluation import (
@@ -66,6 +67,7 @@ def main() -> None:
         )
         methods = {
             "spectralstore_asym": AsymmetricSpectralCompressor(compressor_config),
+            "tensor_unfolding_svd": TensorUnfoldingSVDCompressor(compressor_config),
             "baseline_sym_svd": SymmetricSVDCompressor(compressor_config),
             "baseline_direct_svd": DirectSVDCompressor(compressor_config),
         }

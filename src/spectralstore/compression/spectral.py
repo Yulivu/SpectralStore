@@ -65,13 +65,21 @@ class RobustAsymmetricSpectralCompressor:
         final_store = _factorize_from_basis(cleaned, basis, self.config, residuals=())
         final_residual_stack = _residual_stack(dense, final_store)
         final_residuals, diagnostics = _threshold_residuals(final_residual_stack, self.config)
+        bound_metadata = _degree_aware_bound_metadata(
+            dense,
+            final_residual_stack,
+            final_residuals,
+        )
         return FactorizedTemporalStore(
             left=final_store.left,
             right=final_store.right,
             temporal=final_store.temporal,
             lambdas=final_store.lambdas,
             residuals=final_residuals,
-            threshold_diagnostics=diagnostics,
+            threshold_diagnostics={**diagnostics, **bound_metadata["diagnostics"]},
+            source_degree_scale=bound_metadata["source_degree_scale"],
+            target_degree_scale=bound_metadata["target_degree_scale"],
+            entrywise_bound_scale=bound_metadata["entrywise_bound_scale"],
         )
 
 
@@ -97,6 +105,28 @@ class DirectSVDCompressor:
     def fit_transform(self, snapshots: list[ArrayLikeSnapshot]) -> FactorizedTemporalStore:
         dense = _as_dense_stack(snapshots)
         return _factorize_from_basis(dense, dense.mean(axis=0), self.config)
+
+
+class TensorUnfoldingSVDCompressor:
+    """Tensor-entry baseline using mode-1 and mode-2 unfolding SVD factors."""
+
+    def __init__(self, config: SpectralCompressionConfig | None = None) -> None:
+        self.config = config or SpectralCompressionConfig()
+
+    def fit_transform(self, snapshots: list[ArrayLikeSnapshot]) -> FactorizedTemporalStore:
+        dense = _as_dense_stack(snapshots)
+        rank = min(self.config.rank, dense.shape[1], dense.shape[2])
+        source_unfolding = dense.transpose(1, 0, 2).reshape(dense.shape[1], -1)
+        target_unfolding = dense.transpose(2, 0, 1).reshape(dense.shape[2], -1)
+        left = _truncated_left_singular_vectors(source_unfolding, rank)
+        right = _truncated_left_singular_vectors(target_unfolding, rank)
+        temporal = _project_temporal_weights(dense, left, right)
+        return FactorizedTemporalStore(
+            left=left,
+            right=right,
+            temporal=temporal,
+            lambdas=np.ones(rank, dtype=float),
+        )
 
 
 def _as_dense_stack(snapshots: list[ArrayLikeSnapshot]) -> np.ndarray:
@@ -164,6 +194,22 @@ def _factorize_from_basis(
         lambdas=lambdas,
         residuals=store_residuals,
     )
+
+
+def _truncated_left_singular_vectors(matrix: np.ndarray, rank: int) -> np.ndarray:
+    left_full, _singular_values, _right_t_full = np.linalg.svd(matrix, full_matrices=False)
+    return left_full[:, :rank]
+
+
+def _project_temporal_weights(
+    dense_snapshots: np.ndarray,
+    left: np.ndarray,
+    right: np.ndarray,
+) -> np.ndarray:
+    temporal = np.empty((dense_snapshots.shape[0], left.shape[1]), dtype=float)
+    for t, snapshot in enumerate(dense_snapshots):
+        temporal[t] = np.einsum("ij,ij->j", left, snapshot @ right)
+    return temporal
 
 
 def _residual_stack(dense_snapshots: np.ndarray, store: FactorizedTemporalStore) -> np.ndarray:
@@ -252,3 +298,41 @@ def _adaptive_residual_threshold(
             return quantile_threshold, diagnostics
         return mad_threshold, diagnostics
     raise ValueError(f"unsupported residual_threshold_mode: {config.residual_threshold_mode}")
+
+
+def _degree_aware_bound_metadata(
+    dense_snapshots: np.ndarray,
+    residual_stack: np.ndarray,
+    residuals: tuple[sparse.csr_matrix, ...],
+) -> dict[str, Any]:
+    source_degree_scale, target_degree_scale = _degree_scales(dense_snapshots)
+    edge_scale = 0.5 * (source_degree_scale[:, None] + target_degree_scale[None, :])
+    residual_dense = np.stack([residual.toarray() for residual in residuals])
+    omitted_residual = residual_stack - residual_dense
+    per_entry_scale = np.abs(omitted_residual) / np.maximum(edge_scale[None, :, :], 1e-12)
+    entrywise_bound_scale = float(np.max(per_entry_scale))
+    return {
+        "source_degree_scale": source_degree_scale,
+        "target_degree_scale": target_degree_scale,
+        "entrywise_bound_scale": entrywise_bound_scale,
+        "diagnostics": {
+            "degree_aware_bound_scale": entrywise_bound_scale,
+            "source_degree_scale_mean": float(np.mean(source_degree_scale)),
+            "target_degree_scale_mean": float(np.mean(target_degree_scale)),
+            "source_degree_scale_max": float(np.max(source_degree_scale)),
+            "target_degree_scale_max": float(np.max(target_degree_scale)),
+        },
+    }
+
+
+def _degree_scales(dense_snapshots: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    weighted_degree = np.abs(dense_snapshots)
+    source_degree = weighted_degree.sum(axis=2).mean(axis=0)
+    target_degree = weighted_degree.sum(axis=1).mean(axis=0)
+    mean_degree = float(np.mean(0.5 * (source_degree + target_degree)))
+    if mean_degree <= 1e-12:
+        return np.ones_like(source_degree), np.ones_like(target_degree)
+
+    source_mu = np.maximum(source_degree / mean_degree, 1e-6)
+    target_mu = np.maximum(target_degree / mean_degree, 1e-6)
+    return 1.0 / np.sqrt(source_mu), 1.0 / np.sqrt(target_mu)
