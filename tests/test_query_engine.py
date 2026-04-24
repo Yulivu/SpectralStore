@@ -45,6 +45,30 @@ def test_link_prob_with_error_uses_threshold_diagnostics() -> None:
     assert uncorrected.error_bound == 0.35
 
 
+def test_link_prob_optimizer_reads_residual_only_when_needed() -> None:
+    store = FactorizedTemporalStore(
+        left=np.array([[1.0], [2.0]]),
+        right=np.array([[3.0], [4.0]]),
+        temporal=np.array([[1.0]]),
+        lambdas=np.array([2.0]),
+        residuals=(sparse.csr_matrix([[0.0, 0.25], [0.0, 0.0]]),),
+        threshold_diagnostics={"estimated_threshold": 0.1},
+    )
+    engine = QueryEngine(store)
+
+    loose = engine.link_prob_optimized(0, 1, 0, error_tolerance=0.4)
+    tight = engine.link_prob_optimized(0, 1, 0, error_tolerance=0.2)
+
+    assert loose.value == 8.0
+    assert loose.error_bound == 0.35
+    assert loose.used_residual is False
+    assert loose.satisfied_error_tolerance is True
+    assert tight.value == 8.25
+    assert tight.error_bound == 0.1
+    assert tight.used_residual is True
+    assert tight.satisfied_error_tolerance is True
+
+
 def test_link_prob_with_error_returns_none_without_diagnostics() -> None:
     store = FactorizedTemporalStore(
         left=np.array([[1.0]]),
@@ -98,3 +122,19 @@ def test_temporal_trend_with_error_is_inclusive() -> None:
 
     assert [result.value for result in trend] == [1.0, 2.0, 3.0]
     assert [result.error_bound for result in trend] == [0.2, 0.2, 0.2]
+
+
+def test_temporal_trend_optimizer_is_inclusive() -> None:
+    store = FactorizedTemporalStore(
+        left=np.array([[1.0]]),
+        right=np.array([[2.0]]),
+        temporal=np.array([[1.0], [2.0], [3.0]]),
+        lambdas=np.array([0.5]),
+        threshold_diagnostics={"estimated_threshold": 0.2},
+    )
+
+    trend = QueryEngine(store).temporal_trend_optimized(0, 0, 0, 2, error_tolerance=0.3)
+
+    assert [result.value for result in trend] == [1.0, 2.0, 3.0]
+    assert [result.used_residual for result in trend] == [False, False, False]
+    assert [result.satisfied_error_tolerance for result in trend] == [True, True, True]

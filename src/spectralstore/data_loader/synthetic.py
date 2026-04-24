@@ -100,7 +100,11 @@ def make_synthetic_spiked(
 
     rng = np.random.default_rng(random_seed)
     basis, _ = np.linalg.qr(rng.normal(size=(num_nodes, rank)))
-    lambdas = np.geomspace(snr, max(snr * 0.25, 1e-3), rank)
+    lambdas = np.geomspace(
+        snr * np.sqrt(num_nodes),
+        max(snr * np.sqrt(num_nodes) * 0.25, 1e-3),
+        rank,
+    )
     expected = (basis * lambdas) @ basis.T
     np.fill_diagonal(expected, 0.0)
     noise_scale = 1.0

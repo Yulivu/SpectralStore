@@ -2,6 +2,7 @@ from spectralstore.compression import RobustAsymmetricSpectralCompressor, Spectr
 from spectralstore.data_loader import make_synthetic_attack
 from spectralstore.evaluation import (
     entrywise_bound_coverage,
+    mean_entrywise_error_bound,
     relative_frobenius_error_against_dense,
     residual_nnz,
 )
@@ -191,6 +192,43 @@ def test_degree_aware_bound_varies_by_node_degree() -> None:
 
     assert store.source_degree_scale is not None
     assert float(store.source_degree_scale.max()) > float(store.source_degree_scale.min())
+
+
+def test_configured_entrywise_bound_coverage_tightens_bound() -> None:
+    dataset = make_synthetic_attack(
+        num_nodes=40,
+        num_steps=4,
+        num_communities=4,
+        attack_kind="sparse_outlier_edges",
+        attack_fraction=0.02,
+        random_seed=28,
+    )
+    safe_store = RobustAsymmetricSpectralCompressor(
+        SpectralCompressionConfig(
+            rank=4,
+            num_splits=3,
+            residual_threshold_mode="hybrid",
+            residual_quantile=0.985,
+            robust_iterations=2,
+            entrywise_bound_coverage=1.0,
+            random_seed=28,
+        )
+    ).fit_transform(dataset.snapshots)
+    tight_store = RobustAsymmetricSpectralCompressor(
+        SpectralCompressionConfig(
+            rank=4,
+            num_splits=3,
+            residual_threshold_mode="hybrid",
+            residual_quantile=0.985,
+            robust_iterations=2,
+            entrywise_bound_coverage=0.95,
+            random_seed=28,
+        )
+    ).fit_transform(dataset.snapshots)
+    observed = [snapshot.toarray() for snapshot in dataset.snapshots]
+
+    assert mean_entrywise_error_bound(tight_store) < mean_entrywise_error_bound(safe_store)
+    assert entrywise_bound_coverage(observed, tight_store, include_residual=True) >= 0.94
 
 
 def test_hybrid_threshold_does_not_over_extract_without_attack() -> None:

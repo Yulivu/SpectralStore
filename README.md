@@ -108,6 +108,15 @@ python scripts/run_synthetic_sbm_bound_scaling.py
 Bound scaling results are written to `bound_scaling_metrics.json` and
 `bound_scaling_summary.md` in the Synthetic-SBM results folder.
 
+Run the Synthetic-Spiked scaling experiment:
+
+```bash
+python scripts/run_synthetic_spiked_scaling.py
+```
+
+Spiked scaling results are written to `spiked_scaling_metrics.json` and
+`spiked_scaling_summary.md` in the Synthetic-Spiked results folder.
+
 ## Status
 
 This repository is in the initial implementation phase. It currently includes:
@@ -118,7 +127,8 @@ This repository is in the initial implementation phase. It currently includes:
 - a tensor-unfolding SVD compressor baseline,
 - a first robust residual compressor,
 - adaptive MAD, fixed-quantile, and hybrid residual threshold policies,
-- degree-aware empirical entrywise error bounds for residual-corrected link and trend queries,
+- configurable degree-aware empirical entrywise error bounds,
+- a first query optimizer for error-tolerant link and trend queries,
 - SymSVD and DirectSVD baselines,
 - Bitcoin-OTC loading,
 - Synthetic-SBM, Synthetic-Spiked, and Synthetic-Attack generation,

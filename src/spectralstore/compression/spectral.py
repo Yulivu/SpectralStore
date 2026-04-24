@@ -23,6 +23,7 @@ class SpectralCompressionConfig:
     residual_mad_multiplier: float = 45.0
     residual_hybrid_tail_quantile: float = 0.95
     residual_hybrid_tail_ratio: float = 2.0
+    entrywise_bound_coverage: float = 1.0
     robust_iterations: int = 1
     random_seed: int = 0
     num_splits: int = 1
@@ -69,6 +70,7 @@ class RobustAsymmetricSpectralCompressor:
             dense,
             final_residual_stack,
             final_residuals,
+            self.config,
         )
         return FactorizedTemporalStore(
             left=final_store.left,
@@ -304,19 +306,23 @@ def _degree_aware_bound_metadata(
     dense_snapshots: np.ndarray,
     residual_stack: np.ndarray,
     residuals: tuple[sparse.csr_matrix, ...],
+    config: SpectralCompressionConfig,
 ) -> dict[str, Any]:
     source_degree_scale, target_degree_scale = _degree_scales(dense_snapshots)
     edge_scale = 0.5 * (source_degree_scale[:, None] + target_degree_scale[None, :])
     residual_dense = np.stack([residual.toarray() for residual in residuals])
     omitted_residual = residual_stack - residual_dense
     per_entry_scale = np.abs(omitted_residual) / np.maximum(edge_scale[None, :, :], 1e-12)
-    entrywise_bound_scale = float(np.max(per_entry_scale))
+    coverage = float(np.clip(config.entrywise_bound_coverage, 0.0, 1.0))
+    entrywise_bound_scale = float(np.quantile(per_entry_scale, coverage))
     return {
         "source_degree_scale": source_degree_scale,
         "target_degree_scale": target_degree_scale,
         "entrywise_bound_scale": entrywise_bound_scale,
         "diagnostics": {
+            "entrywise_bound_coverage_target": coverage,
             "degree_aware_bound_scale": entrywise_bound_scale,
+            "degree_aware_bound_scale_max": float(np.max(per_entry_scale)),
             "source_degree_scale_mean": float(np.mean(source_degree_scale)),
             "target_degree_scale_mean": float(np.mean(target_degree_scale)),
             "source_degree_scale_max": float(np.max(source_degree_scale)),

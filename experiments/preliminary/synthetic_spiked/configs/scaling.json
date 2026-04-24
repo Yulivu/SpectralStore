@@ -1,0 +1,9 @@
+{
+  "num_nodes_values": [60, 120, 240],
+  "num_steps_values": [4, 8, 12],
+  "snr_values": [0.5, 1.0, 2.0, 5.0],
+  "rank": 4,
+  "num_splits": 8,
+  "num_repeats": 3,
+  "random_seed": 401
+}

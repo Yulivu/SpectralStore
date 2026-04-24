@@ -104,24 +104,28 @@ def run_one_setting(config: dict, mode: str, num_nodes: int, num_steps: int) -> 
             random_seed=seed,
             num_splits=config["num_splits"],
         )
-        robust_config = SpectralCompressionConfig(
-            rank=config["rank"],
-            random_seed=seed,
-            num_splits=config["num_splits"],
-            robust_iterations=config["robust_iterations"],
-            residual_threshold_mode=config["residual_threshold_mode"],
-            residual_mad_multiplier=config["residual_mad_multiplier"],
-            residual_quantile=config["residual_quantile"],
-            residual_hybrid_tail_quantile=config["residual_hybrid_tail_quantile"],
-            residual_hybrid_tail_ratio=config["residual_hybrid_tail_ratio"],
-        )
         methods = {
             "spectralstore_asym": AsymmetricSpectralCompressor(base_config),
-            "full_hybrid": RobustAsymmetricSpectralCompressor(robust_config),
             "tensor_unfolding_svd": TensorUnfoldingSVDCompressor(base_config),
             "sym_svd": SymmetricSVDCompressor(base_config),
             "direct_svd": DirectSVDCompressor(base_config),
         }
+        for coverage in config.get("entrywise_bound_coverages", [1.0]):
+            robust_config = SpectralCompressionConfig(
+                rank=config["rank"],
+                random_seed=seed,
+                num_splits=config["num_splits"],
+                robust_iterations=config["robust_iterations"],
+                residual_threshold_mode=config["residual_threshold_mode"],
+                residual_mad_multiplier=config["residual_mad_multiplier"],
+                residual_quantile=config["residual_quantile"],
+                residual_hybrid_tail_quantile=config["residual_hybrid_tail_quantile"],
+                residual_hybrid_tail_ratio=config["residual_hybrid_tail_ratio"],
+                entrywise_bound_coverage=coverage,
+            )
+            methods[f"full_hybrid_cov{int(round(coverage * 100))}"] = (
+                RobustAsymmetricSpectralCompressor(robust_config)
+            )
 
         observed_snapshots = [snapshot.toarray() for snapshot in dataset.snapshots]
         run_result = {"repeat": repeat, "seed": seed, "methods": {}}
@@ -136,6 +140,8 @@ def run_one_setting(config: dict, mode: str, num_nodes: int, num_steps: int) -> 
                 ),
             }
             if store.threshold_diagnostics is not None:
+                mean_bound = mean_entrywise_error_bound(store)
+                max_bound = max_entrywise_error_bound(store)
                 values.update(
                     {
                         "observed_bound_coverage": entrywise_bound_coverage(
@@ -148,8 +154,12 @@ def run_one_setting(config: dict, mode: str, num_nodes: int, num_steps: int) -> 
                             store,
                             include_residual=True,
                         ),
-                        "mean_entrywise_bound": mean_entrywise_error_bound(store),
-                        "max_entrywise_bound": max_entrywise_error_bound(store),
+                        "mean_entrywise_bound": mean_bound,
+                        "max_entrywise_bound": max_bound,
+                        "mean_bound_tightness": mean_bound
+                        / max(values["mean_entrywise_error"], 1e-12),
+                        "max_bound_tightness": max_bound
+                        / max(values["max_entrywise_error"], 1e-12),
                     }
                 )
             run_result["methods"][name] = values
@@ -210,29 +220,31 @@ def render_mode_table(metrics: dict, mode: str) -> list[str]:
     lines = [
         f"## {title}",
         "",
-        "| n | T | theory scale | asym max err | hybrid max err | tensor max err | "
-        "sym max err | hybrid mean bound | hybrid max bound | observed coverage | "
-        "expected coverage |",
+        "| n | T | theory scale | asym max err | tensor max err | sym max err | "
+        "cov100 mean bound | cov99 mean bound | cov95 mean bound | cov95 coverage | "
+        "cov95 tightness |",
         "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for result in metrics["scaling"]:
         if result["mode"] != mode:
             continue
         aggregates = result["aggregates"]
-        hybrid = aggregates["full_hybrid"]
+        cov100 = aggregates["full_hybrid_cov100"]
+        cov99 = aggregates["full_hybrid_cov99"]
+        cov95 = aggregates["full_hybrid_cov95"]
         lines.append(
             "| "
             f"{result['num_nodes']} | "
             f"{result['num_steps']} | "
             f"{result['theory_scale']:.4f} | "
             f"{format_mean_std(aggregates['spectralstore_asym']['max_entrywise_error'])} | "
-            f"{format_mean_std(hybrid['max_entrywise_error'])} | "
             f"{format_mean_std(aggregates['tensor_unfolding_svd']['max_entrywise_error'])} | "
             f"{format_mean_std(aggregates['sym_svd']['max_entrywise_error'])} | "
-            f"{format_mean_std(hybrid['mean_entrywise_bound'])} | "
-            f"{format_mean_std(hybrid['max_entrywise_bound'])} | "
-            f"{format_mean_std(hybrid['observed_bound_coverage'])} | "
-            f"{format_mean_std(hybrid['expected_bound_coverage'])} |"
+            f"{format_mean_std(cov100['mean_entrywise_bound'])} | "
+            f"{format_mean_std(cov99['mean_entrywise_bound'])} | "
+            f"{format_mean_std(cov95['mean_entrywise_bound'])} | "
+            f"{format_mean_std(cov95['observed_bound_coverage'])} | "
+            f"{format_mean_std(cov95['mean_bound_tightness'])} |"
         )
     lines.append("")
     return lines

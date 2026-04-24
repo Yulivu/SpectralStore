@@ -15,6 +15,8 @@ class BoundedQueryResult:
 
     value: float
     error_bound: float | None
+    used_residual: bool | None = None
+    satisfied_error_tolerance: bool | None = None
 
 
 class QueryEngine:
@@ -41,6 +43,44 @@ class QueryEngine:
                 v,
                 t,
                 include_residual=include_residual,
+            ),
+            used_residual=include_residual,
+        )
+
+    def link_prob_optimized(
+        self,
+        u: int,
+        v: int,
+        t: int,
+        *,
+        error_tolerance: float,
+    ) -> BoundedQueryResult:
+        low_rank_bound = self.store.entrywise_error_bound(
+            u,
+            v,
+            t,
+            include_residual=False,
+        )
+        if low_rank_bound is not None and low_rank_bound <= error_tolerance:
+            return BoundedQueryResult(
+                value=self.store.link_score(u, v, t, include_residual=False),
+                error_bound=low_rank_bound,
+                used_residual=False,
+                satisfied_error_tolerance=True,
+            )
+
+        corrected_bound = self.store.entrywise_error_bound(
+            u,
+            v,
+            t,
+            include_residual=True,
+        )
+        return BoundedQueryResult(
+            value=self.store.link_score(u, v, t, include_residual=True),
+            error_bound=corrected_bound,
+            used_residual=True,
+            satisfied_error_tolerance=(
+                corrected_bound is not None and corrected_bound <= error_tolerance
             ),
         )
 
@@ -94,6 +134,22 @@ class QueryEngine:
             raise ValueError("t1 must be less than or equal to t2")
         return [
             self.link_prob_with_error(u, v, t, include_residual=include_residual)
+            for t in range(t1, t2 + 1)
+        ]
+
+    def temporal_trend_optimized(
+        self,
+        u: int,
+        v: int,
+        t1: int,
+        t2: int,
+        *,
+        error_tolerance: float,
+    ) -> list[BoundedQueryResult]:
+        if t1 > t2:
+            raise ValueError("t1 must be less than or equal to t2")
+        return [
+            self.link_prob_optimized(u, v, t, error_tolerance=error_tolerance)
             for t in range(t1, t2 + 1)
         ]
 
