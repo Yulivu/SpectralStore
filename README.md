@@ -91,6 +91,14 @@ python scripts/run_preliminary_synthetic_attack.py
 
 Results are written under `experiments/preliminary/synthetic_attack/results/`.
 
+Run the Synthetic-Attack robustness sweep:
+
+```bash
+python scripts/run_preliminary_synthetic_attack_sweep.py
+```
+
+Sweep results are written to `sweep_metrics.json` and `sweep_summary.md` in the same results folder.
+
 ## Status
 
 This repository is in the initial implementation phase. It currently includes:

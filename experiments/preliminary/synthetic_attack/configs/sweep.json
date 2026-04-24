@@ -1,0 +1,28 @@
+{
+  "num_nodes": 240,
+  "num_steps": 12,
+  "num_communities": 4,
+  "p_in": 0.3,
+  "p_out": 0.05,
+  "temporal_jitter": 0.08,
+  "attack_kinds": [
+    "sparse_outlier_edges",
+    "random_flip",
+    "targeted_cross_community"
+  ],
+  "attack_fractions": [
+    0.0,
+    0.005,
+    0.01,
+    0.02,
+    0.05
+  ],
+  "outlier_weight": 3.0,
+  "directed": true,
+  "rank": 4,
+  "num_splits": 8,
+  "robust_iterations": 2,
+  "residual_quantile": 0.985,
+  "num_repeats": 3,
+  "random_seed": 101
+}

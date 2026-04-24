@@ -116,7 +116,7 @@ def make_synthetic_attack(
     )
     rng = np.random.default_rng(random_seed + 10_000)
     possible_pairs = _candidate_pairs(clean.communities, attack_kind, directed=directed)
-    attacks_per_step = max(1, int(round(attack_fraction * len(possible_pairs))))
+    attacks_per_step = int(round(attack_fraction * len(possible_pairs)))
     attacked_snapshots: list[sparse.csr_matrix] = []
     attack_edges: list[tuple[int, int, int]] = []
 
@@ -177,6 +177,8 @@ def _sample_pairs(
     pairs: np.ndarray,
     count: int,
 ) -> np.ndarray:
+    if count <= 0:
+        return np.empty((0, 2), dtype=int)
     if count >= len(pairs):
         return pairs.copy()
     indices = rng.choice(len(pairs), size=count, replace=False)

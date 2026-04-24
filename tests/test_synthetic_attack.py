@@ -37,6 +37,17 @@ def test_synthetic_attack_severity_increases_attack_edges() -> None:
     assert len(large.attack_edges) > len(small.attack_edges)
 
 
+def test_synthetic_attack_allows_zero_attack_fraction() -> None:
+    dataset = make_synthetic_attack(
+        num_nodes=30,
+        num_steps=2,
+        attack_fraction=0.0,
+        random_seed=4,
+    )
+
+    assert len(dataset.attack_edges) == 0
+
+
 def test_robust_compressor_produces_residuals_per_snapshot() -> None:
     dataset = make_synthetic_attack(
         num_nodes=32,
