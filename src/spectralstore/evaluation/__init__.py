@@ -2,6 +2,7 @@
 
 from spectralstore.evaluation.metrics import (
     anomaly_precision_recall,
+    entrywise_bound_coverage,
     max_entrywise_error,
     mean_entrywise_error,
     observed_edge_mae,
@@ -14,6 +15,7 @@ from spectralstore.evaluation.metrics import (
 
 __all__ = [
     "anomaly_precision_recall",
+    "entrywise_bound_coverage",
     "max_entrywise_error",
     "mean_entrywise_error",
     "observed_edge_mae",

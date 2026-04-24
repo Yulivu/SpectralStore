@@ -57,6 +57,32 @@ class FactorizedTemporalStore:
             base += float(self.residuals[t][u, v])
         return base
 
+    def entrywise_error_bound(
+        self,
+        u: int,
+        v: int,
+        t: int,
+        *,
+        include_residual: bool = True,
+    ) -> float | None:
+        """Return an empirical omitted-residual bound for one entry.
+
+        Robust residual stores separate entries above the estimated threshold.
+        After residual correction, the remaining unmaterialized entrywise error
+        is bounded empirically by that threshold on the fitted snapshots.
+        """
+        self._validate_query_indices(u, v, t)
+        if self.threshold_diagnostics is None:
+            return None
+        threshold = self.threshold_diagnostics.get("estimated_threshold")
+        if threshold is None:
+            return None
+
+        bound = float(threshold)
+        if not include_residual and self.residuals:
+            bound += abs(float(self.residuals[t][u, v]))
+        return bound
+
     def dense_snapshot(self, t: int, *, include_residual: bool = True) -> np.ndarray:
         if t < 0 or t >= self.num_steps:
             raise IndexError("time index out of range")

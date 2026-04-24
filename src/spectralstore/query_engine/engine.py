@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from spectralstore.compression import FactorizedTemporalStore
+
+
+@dataclass(frozen=True)
+class BoundedQueryResult:
+    """Approximate query result with an empirical absolute error bound."""
+
+    value: float
+    error_bound: float | None
 
 
 class QueryEngine:
@@ -15,6 +25,24 @@ class QueryEngine:
 
     def link_prob(self, u: int, v: int, t: int, *, include_residual: bool = True) -> float:
         return self.store.link_score(u, v, t, include_residual=include_residual)
+
+    def link_prob_with_error(
+        self,
+        u: int,
+        v: int,
+        t: int,
+        *,
+        include_residual: bool = True,
+    ) -> BoundedQueryResult:
+        return BoundedQueryResult(
+            value=self.store.link_score(u, v, t, include_residual=include_residual),
+            error_bound=self.store.entrywise_error_bound(
+                u,
+                v,
+                t,
+                include_residual=include_residual,
+            ),
+        )
 
     def top_neighbor(
         self,
@@ -50,6 +78,22 @@ class QueryEngine:
             raise ValueError("t1 must be less than or equal to t2")
         return [
             self.store.link_score(u, v, t, include_residual=include_residual)
+            for t in range(t1, t2 + 1)
+        ]
+
+    def temporal_trend_with_error(
+        self,
+        u: int,
+        v: int,
+        t1: int,
+        t2: int,
+        *,
+        include_residual: bool = True,
+    ) -> list[BoundedQueryResult]:
+        if t1 > t2:
+            raise ValueError("t1 must be less than or equal to t2")
+        return [
+            self.link_prob_with_error(u, v, t, include_residual=include_residual)
             for t in range(t1, t2 + 1)
         ]
 

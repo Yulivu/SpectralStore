@@ -23,6 +23,7 @@ from spectralstore.compression import (
 from spectralstore.data_loader import make_synthetic_attack
 from spectralstore.evaluation import (
     anomaly_precision_recall,
+    entrywise_bound_coverage,
     max_entrywise_error,
     mean_entrywise_error,
     residual_nnz,
@@ -143,6 +144,7 @@ def run_one_setting(config: dict, attack_kind: str, attack_fraction: float) -> d
             "attack_edges": len(dataset.attack_edges),
             "methods": {},
         }
+        observed_snapshots = [snapshot.toarray() for snapshot in dataset.snapshots]
         for name, compressor in methods.items():
             store = compressor.fit_transform(dataset.snapshots)
             precision, recall = anomaly_precision_recall(dataset.attack_edges, store)
@@ -161,6 +163,11 @@ def run_one_setting(config: dict, attack_kind: str, attack_fraction: float) -> d
             if store.threshold_diagnostics is not None:
                 values.update(
                     {
+                        "entrywise_bound_coverage": entrywise_bound_coverage(
+                            observed_snapshots,
+                            store,
+                            include_residual=True,
+                        ),
                         "estimated_threshold": float(
                             store.threshold_diagnostics["estimated_threshold"]
                         ),
@@ -243,8 +250,10 @@ def render_summary(metrics: dict) -> str:
         "",
         "| attack | fraction | full MAD rel. Frob | full quantile rel. Frob | "
         "full hybrid rel. Frob | no-robust rel. Frob | MAD gain | quantile gain | "
-        "hybrid gain | hybrid threshold | hybrid noise | hybrid residual sparsity |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "hybrid gain | hybrid threshold | hybrid noise | hybrid coverage | "
+        "hybrid residual sparsity |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
+        "---: | ---: |",
     ]
     for result in metrics["sweep"]:
         aggregates = result["aggregates"]
@@ -265,6 +274,7 @@ def render_summary(metrics: dict) -> str:
             f"{full_hybrid['robustness_gain_vs_best_competitor']['mean']:.3f}x | "
             f"{format_mean_std(full_hybrid['estimated_threshold'])} | "
             f"{format_mean_std(full_hybrid['noise_scale'])} | "
+            f"{format_mean_std(full_hybrid['entrywise_bound_coverage'])} | "
             f"{format_mean_std(full_hybrid['residual_sparsity'])} |"
         )
     lines.append("")

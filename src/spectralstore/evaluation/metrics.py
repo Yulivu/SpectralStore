@@ -67,6 +67,31 @@ def max_entrywise_error(
     return float(np.max(errors))
 
 
+def entrywise_bound_coverage(
+    expected_snapshots: list[np.ndarray],
+    store: FactorizedTemporalStore,
+    *,
+    include_residual: bool = True,
+) -> float:
+    """Return the fraction of entries covered by the store's empirical bound."""
+    if store.threshold_diagnostics is None:
+        return float("nan")
+    threshold = store.threshold_diagnostics.get("estimated_threshold")
+    if threshold is None:
+        return float("nan")
+
+    covered = 0
+    total = 0
+    for t, expected in enumerate(expected_snapshots):
+        reconstruction = store.dense_snapshot(t, include_residual=include_residual)
+        bound = np.full(expected.shape, float(threshold), dtype=float)
+        if not include_residual and store.residuals:
+            bound += np.abs(store.residuals[t].toarray())
+        covered += int(np.sum(np.abs(expected - reconstruction) <= bound + 1e-12))
+        total += expected.size
+    return float(covered / max(total, 1))
+
+
 def mean_entrywise_error(
     expected_snapshots: list[np.ndarray],
     store: FactorizedTemporalStore,

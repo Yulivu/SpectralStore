@@ -1,6 +1,10 @@
 from spectralstore.compression import RobustAsymmetricSpectralCompressor, SpectralCompressionConfig
 from spectralstore.data_loader import make_synthetic_attack
-from spectralstore.evaluation import relative_frobenius_error_against_dense, residual_nnz
+from spectralstore.evaluation import (
+    entrywise_bound_coverage,
+    relative_frobenius_error_against_dense,
+    residual_nnz,
+)
 
 
 def test_synthetic_attack_returns_metadata_and_expected_shapes() -> None:
@@ -134,6 +138,31 @@ def test_threshold_diagnostics_are_recorded() -> None:
     ):
         assert field in store.threshold_diagnostics
     assert store.threshold_diagnostics["residual_nnz"] == residual_nnz(store)
+
+
+def test_entrywise_bound_covers_fitted_snapshots() -> None:
+    dataset = make_synthetic_attack(
+        num_nodes=32,
+        num_steps=4,
+        num_communities=4,
+        attack_kind="sparse_outlier_edges",
+        attack_fraction=0.02,
+        random_seed=26,
+    )
+    store = RobustAsymmetricSpectralCompressor(
+        SpectralCompressionConfig(
+            rank=4,
+            num_splits=3,
+            residual_threshold_mode="hybrid",
+            residual_quantile=0.985,
+            robust_iterations=2,
+            random_seed=26,
+        )
+    ).fit_transform(dataset.snapshots)
+    observed = [snapshot.toarray() for snapshot in dataset.snapshots]
+
+    assert entrywise_bound_coverage(observed, store, include_residual=True) == 1.0
+    assert entrywise_bound_coverage(observed, store, include_residual=False) == 1.0
 
 
 def test_hybrid_threshold_does_not_over_extract_without_attack() -> None:
