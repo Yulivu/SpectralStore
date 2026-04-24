@@ -1,5 +1,6 @@
 from spectralstore.compression import RobustAsymmetricSpectralCompressor, SpectralCompressionConfig
 from spectralstore.data_loader import make_synthetic_attack
+from spectralstore.evaluation import residual_nnz
 
 
 def test_synthetic_attack_returns_metadata_and_expected_shapes() -> None:
@@ -60,6 +61,7 @@ def test_robust_compressor_produces_residuals_per_snapshot() -> None:
         SpectralCompressionConfig(
             rank=4,
             num_splits=3,
+            residual_threshold_mode="quantile",
             residual_quantile=0.95,
             robust_iterations=2,
             random_seed=21,
@@ -70,3 +72,35 @@ def test_robust_compressor_produces_residuals_per_snapshot() -> None:
 
     assert len(store.residuals) == len(dataset.snapshots)
     assert sum(residual.nnz for residual in store.residuals) > 0
+
+
+def test_mad_threshold_is_less_aggressive_without_attack_than_quantile() -> None:
+    dataset = make_synthetic_attack(
+        num_nodes=32,
+        num_steps=4,
+        num_communities=4,
+        attack_fraction=0.0,
+        random_seed=22,
+    )
+    mad_store = RobustAsymmetricSpectralCompressor(
+        SpectralCompressionConfig(
+            rank=4,
+            num_splits=3,
+            residual_threshold_mode="mad",
+            residual_mad_multiplier=45.0,
+            robust_iterations=1,
+            random_seed=22,
+        )
+    ).fit_transform(dataset.snapshots)
+    quantile_store = RobustAsymmetricSpectralCompressor(
+        SpectralCompressionConfig(
+            rank=4,
+            num_splits=3,
+            residual_threshold_mode="quantile",
+            residual_quantile=0.95,
+            robust_iterations=1,
+            random_seed=22,
+        )
+    ).fit_transform(dataset.snapshots)
+
+    assert residual_nnz(mad_store) < residual_nnz(quantile_store)

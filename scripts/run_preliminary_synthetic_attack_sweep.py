@@ -101,15 +101,25 @@ def run_one_setting(config: dict, attack_kind: str, attack_fraction: float) -> d
             random_seed=seed,
             num_splits=config["num_splits"],
         )
-        robust_config = SpectralCompressionConfig(
+        robust_mad_config = SpectralCompressionConfig(
             rank=config["rank"],
             random_seed=seed,
             num_splits=config["num_splits"],
             robust_iterations=config["robust_iterations"],
+            residual_threshold_mode=config.get("residual_threshold_mode", "mad"),
+            residual_mad_multiplier=config.get("residual_mad_multiplier", 45.0),
+        )
+        robust_quantile_config = SpectralCompressionConfig(
+            rank=config["rank"],
+            random_seed=seed,
+            num_splits=config["num_splits"],
+            robust_iterations=config["robust_iterations"],
+            residual_threshold_mode="quantile",
             residual_quantile=config["residual_quantile"],
         )
         methods = {
-            "spectralstore_full": RobustAsymmetricSpectralCompressor(robust_config),
+            "spectralstore_full_mad": RobustAsymmetricSpectralCompressor(robust_mad_config),
+            "spectralstore_full_quantile": RobustAsymmetricSpectralCompressor(robust_quantile_config),
             "spectralstore_no_robust": AsymmetricSpectralCompressor(base_config),
             "baseline_sym_svd": SymmetricSVDCompressor(base_config),
             "baseline_direct_svd": DirectSVDCompressor(base_config),
@@ -142,8 +152,12 @@ def run_one_setting(config: dict, attack_kind: str, attack_fraction: float) -> d
         per_run.append(run_result)
 
     summarized = summarize_aggregates(aggregates)
-    summarized["spectralstore_full"]["robustness_gain_vs_best_competitor"] = {
-        "mean": robustness_gain_vs_best_competitor(summarized),
+    summarized["spectralstore_full_mad"]["robustness_gain_vs_best_competitor"] = {
+        "mean": robustness_gain_vs_best_competitor(summarized, "spectralstore_full_mad"),
+        "std": 0.0,
+    }
+    summarized["spectralstore_full_quantile"]["robustness_gain_vs_best_competitor"] = {
+        "mean": robustness_gain_vs_best_competitor(summarized, "spectralstore_full_quantile"),
         "std": 0.0,
     }
 
@@ -171,8 +185,11 @@ def summarize_aggregates(
     return summarized
 
 
-def robustness_gain_vs_best_competitor(aggregates: dict[str, dict[str, dict[str, float]]]) -> float:
-    full_error = aggregates["spectralstore_full"]["relative_frobenius_error"]["mean"]
+def robustness_gain_vs_best_competitor(
+    aggregates: dict[str, dict[str, dict[str, float]]],
+    method: str,
+) -> float:
+    full_error = aggregates[method]["relative_frobenius_error"]["mean"]
     competitor_errors = [
         aggregates["spectralstore_no_robust"]["relative_frobenius_error"]["mean"],
         aggregates["baseline_sym_svd"]["relative_frobenius_error"]["mean"],
@@ -193,23 +210,25 @@ def render_summary(metrics: dict) -> str:
         f"- repeats: {dataset['num_repeats']}",
         f"- rank: {dataset['rank']}",
         "",
-        "| attack | fraction | full rel. Frob | no-robust rel. Frob | best competitor gain | anomaly P | anomaly R | residual sparsity |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| attack | fraction | full MAD rel. Frob | full quantile rel. Frob | no-robust rel. Frob | MAD gain | quantile gain | MAD anomaly P/R | MAD residual sparsity |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for result in metrics["sweep"]:
         aggregates = result["aggregates"]
-        full = aggregates["spectralstore_full"]
+        full_mad = aggregates["spectralstore_full_mad"]
+        full_quantile = aggregates["spectralstore_full_quantile"]
         no_robust = aggregates["spectralstore_no_robust"]
         lines.append(
             "| "
             f"{result['attack_kind']} | "
             f"{result['attack_fraction']:.3f} | "
-            f"{format_mean_std(full['relative_frobenius_error'])} | "
+            f"{format_mean_std(full_mad['relative_frobenius_error'])} | "
+            f"{format_mean_std(full_quantile['relative_frobenius_error'])} | "
             f"{format_mean_std(no_robust['relative_frobenius_error'])} | "
-            f"{full['robustness_gain_vs_best_competitor']['mean']:.3f}x | "
-            f"{format_mean_std(full['anomaly_precision'])} | "
-            f"{format_mean_std(full['anomaly_recall'])} | "
-            f"{format_mean_std(full['residual_sparsity'])} |"
+            f"{full_mad['robustness_gain_vs_best_competitor']['mean']:.3f}x | "
+            f"{full_quantile['robustness_gain_vs_best_competitor']['mean']:.3f}x | "
+            f"{format_mean_std(full_mad['anomaly_precision'])} / {format_mean_std(full_mad['anomaly_recall'])} | "
+            f"{format_mean_std(full_mad['residual_sparsity'])} |"
         )
     lines.append("")
     lines.extend(render_detailed_method_tables(metrics))
@@ -223,8 +242,8 @@ def render_detailed_method_tables(metrics: dict) -> list[str]:
             [
                 f"### {attack_kind}",
                 "",
-                "| fraction | spectralstore_full | no_robust | sym_svd | direct_svd |",
-                "| ---: | ---: | ---: | ---: | ---: |",
+                "| fraction | full_mad | full_quantile | no_robust | sym_svd | direct_svd |",
+                "| ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
         for result in metrics["sweep"]:
@@ -234,7 +253,8 @@ def render_detailed_method_tables(metrics: dict) -> list[str]:
             lines.append(
                 "| "
                 f"{result['attack_fraction']:.3f} | "
-                f"{format_mean_std(aggregates['spectralstore_full']['relative_frobenius_error'])} | "
+                f"{format_mean_std(aggregates['spectralstore_full_mad']['relative_frobenius_error'])} | "
+                f"{format_mean_std(aggregates['spectralstore_full_quantile']['relative_frobenius_error'])} | "
                 f"{format_mean_std(aggregates['spectralstore_no_robust']['relative_frobenius_error'])} | "
                 f"{format_mean_std(aggregates['baseline_sym_svd']['relative_frobenius_error'])} | "
                 f"{format_mean_std(aggregates['baseline_direct_svd']['relative_frobenius_error'])} |"

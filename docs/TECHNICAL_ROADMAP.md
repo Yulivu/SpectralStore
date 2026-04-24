@@ -29,7 +29,7 @@
 - **P0: Synthetic-Attack + Robust residual**  
   目标是做出 `SpectralStore-Full` 与 `NoRobust` 的第一组消融，让方法进入它最擅长的对抗扰动场景。
 - **P1: entrywise bound 初版**  
-  加入经验噪声估计、节点度参数和可返回的 query error bound。
+  加入经验噪声估计、节点度参数和可返回的 query error bound。当前已完成第一步：MAD 自适应 residual threshold，用于避免无攻击时固定比例剥离 residual。
 - **P2: query optimizer + residual correction**  
   让查询根据误差容忍度决定是否读取 residual。
 - **P3: PQ index + query latency experiment**  
@@ -71,4 +71,3 @@
 - `experiments/preliminary/synthetic_attack/results/summary.md` 包含 Full vs NoRobust vs baseline 表格。
 - Synthetic-Attack 生成器返回正确尺寸，且 attack severity 增大时扰动边数量增加。
 - Robust compressor 能产生 residuals，且 residual 数量等于时间快照数。
-

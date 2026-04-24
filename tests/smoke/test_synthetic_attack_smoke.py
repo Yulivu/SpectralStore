@@ -16,6 +16,7 @@ def test_synthetic_attack_smoke_runs_end_to_end() -> None:
         SpectralCompressionConfig(
             rank=3,
             num_splits=2,
+            residual_threshold_mode="quantile",
             residual_quantile=0.95,
             robust_iterations=1,
             random_seed=8,

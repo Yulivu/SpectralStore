@@ -12,6 +12,22 @@ expected to help less there. Treat those rows as a diagnostic for threshold
 policy and future attack-specific robustification, not as the final robust graph
 learning result.
 
+The sweep compares two robust residual policies:
+
+- `spectralstore_full_mad`: adaptive threshold based on the upper tail of
+  absolute residuals. This is the preferred default because it can avoid forced
+  residual extraction when no attack is present.
+- `spectralstore_full_quantile`: fixed residual sparsity. This is useful for
+  controlled comparisons, but it can over-clean normal noise when the graph is
+  clean and under-clean when the attack fraction exceeds the chosen quantile.
+
+Current interpretation:
+
+- Sparse outlier attacks are where residual separation is strongest.
+- Random flips and targeted cross-community edges are structural perturbations;
+  they need future graph-aware robustification rather than only magnitude-based
+  residual thresholding.
+
 Outputs:
 
 - `results/metrics.json`: per-run and aggregate metrics

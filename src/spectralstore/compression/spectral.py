@@ -17,7 +17,9 @@ ArrayLikeSnapshot = np.ndarray | sparse.spmatrix
 class SpectralCompressionConfig:
     rank: int = 8
     residual_threshold: float | None = None
+    residual_threshold_mode: str = "mad"
     residual_quantile: float = 0.98
+    residual_mad_multiplier: float = 45.0
     robust_iterations: int = 1
     random_seed: int = 0
     num_splits: int = 1
@@ -167,9 +169,8 @@ def _threshold_residuals(
     residual_stack: np.ndarray,
     config: SpectralCompressionConfig,
 ) -> tuple[sparse.csr_matrix, ...]:
-    abs_residuals = np.abs(residual_stack)
     if config.residual_threshold is None:
-        threshold = float(np.quantile(abs_residuals, config.residual_quantile))
+        threshold = _adaptive_residual_threshold(residual_stack, config)
     else:
         threshold = config.residual_threshold
 
@@ -179,3 +180,20 @@ def _threshold_residuals(
         separated[np.abs(separated) < threshold] = 0.0
         residual_matrices.append(sparse.csr_matrix(separated))
     return tuple(residual_matrices)
+
+
+def _adaptive_residual_threshold(
+    residual_stack: np.ndarray,
+    config: SpectralCompressionConfig,
+) -> float:
+    if config.residual_threshold_mode == "quantile":
+        return float(np.quantile(np.abs(residual_stack), config.residual_quantile))
+    if config.residual_threshold_mode == "mad":
+        abs_residuals = np.abs(residual_stack).ravel()
+        center = float(np.median(abs_residuals))
+        mad = float(np.median(np.abs(abs_residuals - center)))
+        sigma = 1.4826 * mad
+        if sigma <= 1e-12:
+            return float(np.max(np.abs(residual_stack)) + 1.0)
+        return float(center + config.residual_mad_multiplier * sigma)
+    raise ValueError(f"unsupported residual_threshold_mode: {config.residual_threshold_mode}")

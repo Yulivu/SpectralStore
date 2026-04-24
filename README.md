@@ -107,6 +107,7 @@ This repository is in the initial implementation phase. It currently includes:
 - an asymmetric spectral compressor,
 - multi-split asymmetric spectral ensembling,
 - a first robust residual compressor,
+- adaptive MAD and fixed-quantile residual threshold policies,
 - SymSVD and DirectSVD baselines,
 - Bitcoin-OTC loading,
 - Synthetic-SBM and Synthetic-Attack generation,

@@ -71,15 +71,25 @@ def main() -> None:
             random_seed=seed,
             num_splits=config["num_splits"],
         )
-        robust_config = SpectralCompressionConfig(
+        robust_mad_config = SpectralCompressionConfig(
             rank=config["rank"],
             random_seed=seed,
             num_splits=config["num_splits"],
             robust_iterations=config["robust_iterations"],
+            residual_threshold_mode=config.get("residual_threshold_mode", "mad"),
+            residual_mad_multiplier=config.get("residual_mad_multiplier", 45.0),
+        )
+        robust_quantile_config = SpectralCompressionConfig(
+            rank=config["rank"],
+            random_seed=seed,
+            num_splits=config["num_splits"],
+            robust_iterations=config["robust_iterations"],
+            residual_threshold_mode="quantile",
             residual_quantile=config["residual_quantile"],
         )
         methods = {
-            "spectralstore_full": RobustAsymmetricSpectralCompressor(robust_config),
+            "spectralstore_full_mad": RobustAsymmetricSpectralCompressor(robust_mad_config),
+            "spectralstore_full_quantile": RobustAsymmetricSpectralCompressor(robust_quantile_config),
             "spectralstore_no_robust": AsymmetricSpectralCompressor(base_config),
             "baseline_sym_svd": SymmetricSVDCompressor(base_config),
             "baseline_direct_svd": DirectSVDCompressor(base_config),
