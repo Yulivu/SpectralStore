@@ -1,0 +1,28 @@
+output_dir: experiments/results/exp1
+random_seed: 401
+num_repeats: 10
+rank: 5
+num_splits: 1
+dense_memory_limit_gb: 4.0
+methods:
+  - spectralstore_asym
+  - sym_svd
+  - direct_svd
+  - tensor_unfolding_svd
+sbm:
+  num_communities: 5
+  p_in: 0.3
+  p_out: 0.05
+  temporal_jitter: 0.08
+  directed: true
+  fixed_t: 20
+  fixed_n: 2000
+  n_values: [500, 1000, 2000, 5000]
+  t_values: [5, 10, 20, 50]
+  low_snr:
+    p_in: 0.15
+    p_out: 0.10
+spiked:
+  fixed_n: 1000
+  fixed_t: 20
+  snr_values: [0.5, 1.0, 2.0, 5.0]

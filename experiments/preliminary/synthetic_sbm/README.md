@@ -1,8 +1,8 @@
 # Preliminary Synthetic-SBM Experiment
 
 Goal: compare SpectralStore's asymmetric spectral compressor against tensor
-unfolding SVD, SymSVD, and DirectSVD on a controlled temporal stochastic block
-model.
+unfolding SVD, CP-ALS, Tucker-HOSVD, SymSVD, and DirectSVD on a controlled
+temporal stochastic block model.
 
 This experiment evaluates reconstruction against the latent expected adjacency
 matrices, not just against noisy sampled edges.

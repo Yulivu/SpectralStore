@@ -19,6 +19,19 @@ class TemporalGraphDataset:
     snapshots: list[sparse.csr_matrix]
     node_ids: list[int]
     time_bins: list[str]
+    expected_snapshots: list[np.ndarray] | None = None
+    communities: np.ndarray | None = None
+    attack_edges: tuple[tuple[int, int, int], ...] = ()
+    attack_kind: str | None = None
+    held_out_edges: tuple[tuple[int, int, int, float], ...] = ()
+
+    @property
+    def num_nodes(self) -> int:
+        return len(self.node_ids)
+
+    @property
+    def num_steps(self) -> int:
+        return len(self.snapshots)
 
 
 def load_bitcoin_otc(

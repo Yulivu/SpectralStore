@@ -1,34 +1,37 @@
-"""Run Synthetic-Attack robustness sweep experiments."""
+﻿"""Run Synthetic-Attack robustness sweep experiments."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from spectralstore.compression import (
     AsymmetricSpectralCompressor,
     DirectSVDCompressor,
     RobustAsymmetricSpectralCompressor,
-    SpectralCompressionConfig,
     SymmetricSVDCompressor,
+    spectral_config_from_mapping,
 )
 from spectralstore.data_loader import make_synthetic_attack
 from spectralstore.evaluation import (
     anomaly_precision_recall,
     entrywise_bound_coverage,
+    load_experiment_config,
     max_entrywise_error,
     mean_entrywise_error,
     residual_nnz,
     residual_sparsity,
     relative_frobenius_error_against_dense,
+    set_reproducibility_seed,
+    write_experiment_outputs,
 )
 
 
@@ -36,17 +39,25 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="experiments/preliminary/synthetic_attack/configs/sweep.json",
+        default="experiments/preliminary/synthetic_attack/configs/sweep.yaml",
     )
     parser.add_argument(
         "--out-dir",
         default="experiments/preliminary/synthetic_attack/results",
     )
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        dest="overrides",
+        help="OmegaConf dotlist override, e.g. --set num_repeats=1",
+    )
     args = parser.parse_args()
+    started_at = time.perf_counter()
 
-    config = json.loads(Path(args.config).read_text(encoding="utf-8"))
+    config = load_experiment_config(args.config, args.overrides)
+    set_reproducibility_seed(config.get("random_seed"))
     out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     sweep_results = []
     for attack_kind in config["attack_kinds"]:
@@ -67,12 +78,18 @@ def main() -> None:
         "sweep": sweep_results,
     }
 
-    (out_dir / "sweep_metrics.json").write_text(
-        json.dumps(metrics, indent=2, ensure_ascii=False),
-        encoding="utf-8",
+    summary = render_summary(metrics)
+    write_experiment_outputs(
+        out_dir=out_dir,
+        metrics=metrics,
+        summary=summary,
+        config_path=args.config,
+        config=config,
+        started_at=started_at,
+        metrics_filename="sweep_metrics.json",
+        summary_filename="sweep_summary.md",
     )
-    (out_dir / "sweep_summary.md").write_text(render_summary(metrics), encoding="utf-8")
-    print(render_summary(metrics))
+    print(summary)
 
 
 def run_one_setting(config: dict, attack_kind: str, attack_fraction: float) -> dict:
@@ -97,37 +114,17 @@ def run_one_setting(config: dict, attack_kind: str, attack_fraction: float) -> d
         )
         attack_edge_counts.append(len(dataset.attack_edges))
 
-        base_config = SpectralCompressionConfig(
-            rank=config["rank"],
+        base_config = spectral_config_from_mapping(config, random_seed=seed)
+        robust_mad_config = spectral_config_from_mapping(config, random_seed=seed)
+        robust_quantile_config = spectral_config_from_mapping(
+            config,
             random_seed=seed,
-            num_splits=config["num_splits"],
-        )
-        robust_mad_config = SpectralCompressionConfig(
-            rank=config["rank"],
-            random_seed=seed,
-            num_splits=config["num_splits"],
-            robust_iterations=config["robust_iterations"],
-            residual_threshold_mode=config.get("residual_threshold_mode", "mad"),
-            residual_mad_multiplier=config.get("residual_mad_multiplier", 45.0),
-        )
-        robust_quantile_config = SpectralCompressionConfig(
-            rank=config["rank"],
-            random_seed=seed,
-            num_splits=config["num_splits"],
-            robust_iterations=config["robust_iterations"],
             residual_threshold_mode="quantile",
-            residual_quantile=config["residual_quantile"],
         )
-        robust_hybrid_config = SpectralCompressionConfig(
-            rank=config["rank"],
+        robust_hybrid_config = spectral_config_from_mapping(
+            config,
             random_seed=seed,
-            num_splits=config["num_splits"],
-            robust_iterations=config["robust_iterations"],
             residual_threshold_mode="hybrid",
-            residual_mad_multiplier=config.get("residual_mad_multiplier", 45.0),
-            residual_quantile=config["residual_quantile"],
-            residual_hybrid_tail_quantile=config.get("residual_hybrid_tail_quantile", 0.95),
-            residual_hybrid_tail_ratio=config.get("residual_hybrid_tail_ratio", 2.0),
         )
         methods = {
             "full_mad": RobustAsymmetricSpectralCompressor(robust_mad_config),
@@ -159,6 +156,10 @@ def run_one_setting(config: dict, attack_kind: str, attack_fraction: float) -> d
                 "anomaly_recall": recall,
                 "residual_nnz": float(residual_nnz(store)),
                 "residual_sparsity": residual_sparsity(store),
+                "compressed_vs_raw_dense_ratio": store.compressed_vs_raw_dense_ratio(),
+                "compressed_vs_raw_sparse_ratio": store.compressed_vs_raw_sparse_ratio(
+                    dataset.snapshots
+                ),
             }
             if store.threshold_diagnostics is not None:
                 values.update(
@@ -251,9 +252,9 @@ def render_summary(metrics: dict) -> str:
         "| attack | fraction | full MAD rel. Frob | full quantile rel. Frob | "
         "full hybrid rel. Frob | no-robust rel. Frob | MAD gain | quantile gain | "
         "hybrid gain | hybrid threshold | hybrid noise | hybrid coverage | "
-        "hybrid residual sparsity |",
+        "hybrid residual sparsity | hybrid sparse ratio |",
         "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
-        "---: | ---: |",
+        "---: | ---: | ---: |",
     ]
     for result in metrics["sweep"]:
         aggregates = result["aggregates"]
@@ -275,7 +276,8 @@ def render_summary(metrics: dict) -> str:
             f"{format_mean_std(full_hybrid['estimated_threshold'])} | "
             f"{format_mean_std(full_hybrid['noise_scale'])} | "
             f"{format_mean_std(full_hybrid['entrywise_bound_coverage'])} | "
-            f"{format_mean_std(full_hybrid['residual_sparsity'])} |"
+            f"{format_mean_std(full_hybrid['residual_sparsity'])} | "
+            f"{format_mean_std(full_hybrid['compressed_vs_raw_sparse_ratio'])} |"
         )
     lines.append("")
     lines.extend(render_detailed_method_tables(metrics))
@@ -318,3 +320,4 @@ def format_mean_std(values: dict[str, float]) -> str:
 
 if __name__ == "__main__":
     main()
+

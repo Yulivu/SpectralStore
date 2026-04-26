@@ -3,9 +3,11 @@ from spectralstore.data_loader import make_synthetic_attack
 from spectralstore.evaluation import (
     entrywise_bound_coverage,
     mean_entrywise_error_bound,
+    q5_anomaly_detection_scores,
     relative_frobenius_error_against_dense,
     residual_nnz,
 )
+from spectralstore.query_engine import QueryEngine
 
 
 def test_synthetic_attack_returns_metadata_and_expected_shapes() -> None:
@@ -54,6 +56,24 @@ def test_synthetic_attack_allows_zero_attack_fraction() -> None:
     assert len(dataset.attack_edges) == 0
 
 
+def test_sparse_corruption_modes_keep_ground_truth_masks() -> None:
+    for attack_kind in ("sparse_spike", "signed_spike", "block_sparse_spike"):
+        dataset = make_synthetic_attack(
+            num_nodes=30,
+            num_steps=2,
+            num_communities=3,
+            attack_kind=attack_kind,
+            corruption_rate=0.02,
+            corruption_magnitude=4.0,
+            random_seed=13,
+        )
+
+        assert dataset.attack_kind == attack_kind
+        assert len(dataset.corruption_masks) == len(dataset.snapshots)
+        assert sum(mask.nnz for mask in dataset.corruption_masks) == len(dataset.attack_edges)
+        assert len(dataset.attack_edges) > 0
+
+
 def test_robust_compressor_produces_residuals_per_snapshot() -> None:
     dataset = make_synthetic_attack(
         num_nodes=32,
@@ -77,6 +97,36 @@ def test_robust_compressor_produces_residuals_per_snapshot() -> None:
 
     assert len(store.residuals) == len(dataset.snapshots)
     assert sum(residual.nnz for residual in store.residuals) > 0
+
+
+def test_q5_anomaly_detection_reports_counts_precision_and_recall() -> None:
+    dataset = make_synthetic_attack(
+        num_nodes=40,
+        num_steps=4,
+        num_communities=2,
+        attack_fraction=0.02,
+        outlier_weight=3.0,
+        random_seed=19,
+    )
+    store = RobustAsymmetricSpectralCompressor(
+        SpectralCompressionConfig(
+            rank=2,
+            random_seed=19,
+            residual_threshold_mode="mad",
+            residual_mad_multiplier=20.0,
+        )
+    ).fit_transform(dataset.snapshots)
+
+    scores = q5_anomaly_detection_scores(
+        dataset.attack_edges,
+        QueryEngine(store),
+        threshold=0.0,
+    )
+
+    assert scores["injected_anomaly_edges"] == len(dataset.attack_edges)
+    assert scores["q5_detected_edges"] >= scores["q5_true_positives"]
+    assert 0.0 <= scores["q5_precision"] <= 1.0
+    assert 0.0 <= scores["q5_recall"] <= 1.0
 
 
 def test_mad_threshold_is_less_aggressive_without_attack_than_quantile() -> None:

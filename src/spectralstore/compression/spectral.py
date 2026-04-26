@@ -7,6 +7,7 @@ from typing import Any
 
 import numpy as np
 from scipy import sparse
+from scipy.sparse.linalg import svds
 
 from spectralstore.compression import FactorizedTemporalStore
 
@@ -23,8 +24,21 @@ class SpectralCompressionConfig:
     residual_mad_multiplier: float = 45.0
     residual_hybrid_tail_quantile: float = 0.95
     residual_hybrid_tail_ratio: float = 2.0
+    residual_threshold_scale: float = 1.0
     entrywise_bound_coverage: float = 1.0
     robust_iterations: int = 1
+    tensor_iterations: int = 10
+    tensor_ridge: float = 1e-6
+    tensor_rank_energy: float = 1.0
+    tensor_min_rank: int = 1
+    rpca_iterations: int = 100
+    rpca_tol: float = 1e-6
+    rpca_reg_E: float = 1.0
+    rpca_reg_J: float = 1.0
+    rank_pruning_mode: str = "none"
+    rank_pruning_threshold: float = 0.01
+    rank_pruning_min_rank: int = 1
+    rank_pruning_iterations: int = 1
     random_seed: int = 0
     num_splits: int = 1
 
@@ -78,7 +92,11 @@ class RobustAsymmetricSpectralCompressor:
             temporal=final_store.temporal,
             lambdas=final_store.lambdas,
             residuals=final_residuals,
-            threshold_diagnostics={**diagnostics, **bound_metadata["diagnostics"]},
+            threshold_diagnostics={
+                **diagnostics,
+                **(final_store.threshold_diagnostics or {}),
+                **bound_metadata["diagnostics"],
+            },
             source_degree_scale=bound_metadata["source_degree_scale"],
             target_degree_scale=bound_metadata["target_degree_scale"],
             entrywise_bound_scale=bound_metadata["entrywise_bound_scale"],
@@ -123,11 +141,258 @@ class TensorUnfoldingSVDCompressor:
         left = _truncated_left_singular_vectors(source_unfolding, rank)
         right = _truncated_left_singular_vectors(target_unfolding, rank)
         temporal = _project_temporal_weights(dense, left, right)
+        return _store_from_tensor_factors(
+            left,
+            right,
+            temporal,
+            self.config,
+            method="tensor_unfolding_svd",
+        )
+
+
+class SparseUnfoldingAsymmetricCompressor:
+    """Sparse temporal-unfolding SpectralStore compressor.
+
+    This keeps the store format diagonal in components while extracting source
+    and target spaces from sparse mode unfoldings instead of from the dense
+    snapshot stack.
+    """
+
+    def __init__(self, config: SpectralCompressionConfig | None = None) -> None:
+        self.config = config or SpectralCompressionConfig()
+
+    def fit_transform(self, snapshots: list[ArrayLikeSnapshot]) -> FactorizedTemporalStore:
+        if not snapshots:
+            raise ValueError("snapshots cannot be empty")
+        sparse_snapshots = [
+            snapshot.tocsr() if sparse.issparse(snapshot) else sparse.csr_matrix(snapshot)
+            for snapshot in snapshots
+        ]
+        first_shape = sparse_snapshots[0].shape
+        if any(snapshot.shape != first_shape for snapshot in sparse_snapshots):
+            raise ValueError("all snapshots must have the same shape")
+
+        rank = min(self.config.rank, first_shape[0], first_shape[1])
+        source_unfolding = sparse.hstack(sparse_snapshots, format="csr")
+        target_unfolding = sparse.hstack(
+            [snapshot.T.tocsr() for snapshot in sparse_snapshots],
+            format="csr",
+        )
+        left = _truncated_sparse_left_singular_vectors(
+            source_unfolding,
+            rank,
+            self.config.random_seed,
+        )
+        right = _truncated_sparse_left_singular_vectors(
+            target_unfolding,
+            rank,
+            self.config.random_seed + 1,
+        )
+        temporal = _project_temporal_weights(sparse_snapshots, left, right)
+        return _store_from_tensor_factors(
+            left,
+            right,
+            temporal,
+            self.config,
+            method="sparse_unfolding_asym",
+            extra_diagnostics={
+                "source_unfolding_shape": list(source_unfolding.shape),
+                "target_unfolding_shape": list(target_unfolding.shape),
+                "source_unfolding_nnz": int(source_unfolding.nnz),
+                "target_unfolding_nnz": int(target_unfolding.nnz),
+            },
+        )
+
+
+class SplitAsymmetricUnfoldingCompressor:
+    """Split-snapshot asymmetric compressor using independent triangular means."""
+
+    def __init__(self, config: SpectralCompressionConfig | None = None) -> None:
+        self.config = config or SpectralCompressionConfig()
+
+    def fit_transform(self, snapshots: list[ArrayLikeSnapshot]) -> FactorizedTemporalStore:
+        if len(snapshots) < 2:
+            raise ValueError("at least two temporal snapshots are required")
+        sparse_snapshots = [
+            snapshot.tocsr() if sparse.issparse(snapshot) else sparse.csr_matrix(snapshot)
+            for snapshot in snapshots
+        ]
+        first_shape = sparse_snapshots[0].shape
+        if first_shape[0] != first_shape[1]:
+            raise ValueError("split asymmetric unfolding requires square snapshots")
+        if any(snapshot.shape != first_shape for snapshot in sparse_snapshots):
+            raise ValueError("all snapshots must have the same shape")
+
+        rng = np.random.default_rng(self.config.random_seed)
+        order = rng.permutation(len(sparse_snapshots))
+        split = max(1, len(sparse_snapshots) // 2)
+        first_indices = order[:split]
+        second_indices = order[split:]
+        if second_indices.size == 0:
+            second_indices = first_indices
+
+        first_mean = _mean_sparse_snapshots(sparse_snapshots, first_indices)
+        second_mean = _mean_sparse_snapshots(sparse_snapshots, second_indices)
+        stitched = _split_triangular_sparse_matrix(first_mean, second_mean)
+
+        rank = min(self.config.rank, min(stitched.shape))
+        left, singular_values, right_t = _truncated_sparse_svd(
+            stitched,
+            rank,
+            self.config.random_seed,
+        )
+        right = right_t.T
+        safe_singular_values = np.where(np.abs(singular_values) > 1e-12, singular_values, 1.0)
+        temporal = np.empty((len(sparse_snapshots), rank), dtype=float)
+        for t, snapshot in enumerate(sparse_snapshots):
+            temporal[t] = np.einsum("ij,ij->j", left, snapshot @ right) / safe_singular_values
+
         return FactorizedTemporalStore(
             left=left,
             right=right,
             temporal=temporal,
-            lambdas=np.ones(rank, dtype=float),
+            lambdas=singular_values,
+            threshold_diagnostics={
+                "tensor_method": "split_asym_unfolding",
+                "requested_rank": int(self.config.rank),
+                "effective_rank": int(rank),
+                "split_first_size": int(first_indices.size),
+                "split_second_size": int(second_indices.size),
+                "stitched_shape": list(stitched.shape),
+                "stitched_nnz": int(stitched.nnz),
+            },
+        )
+
+
+class CPALSCompressor:
+    """TensorLy CP-ALS baseline for temporal adjacency tensors."""
+
+    def __init__(self, config: SpectralCompressionConfig | None = None) -> None:
+        self.config = config or SpectralCompressionConfig()
+
+    def fit_transform(self, snapshots: list[ArrayLikeSnapshot]) -> FactorizedTemporalStore:
+        dense = _as_dense_stack(snapshots)
+        rank = min(self.config.rank, *dense.shape)
+        try:
+            from tensorly.decomposition import parafac
+        except ImportError as exc:
+            raise ImportError(
+                "TensorLy is required for CPALSCompressor. "
+                "Install experiment dependencies with `python -m pip install -e .[experiments]`."
+            ) from exc
+
+        cp_tensor = parafac(
+            dense,
+            rank=rank,
+            n_iter_max=max(1, self.config.tensor_iterations),
+            init="svd",
+            tol=1e-8,
+            random_state=self.config.random_seed,
+            l2_reg=self.config.tensor_ridge,
+            normalize_factors=False,
+        )
+        weights = np.asarray(cp_tensor.weights, dtype=float)
+        temporal = np.asarray(cp_tensor.factors[0], dtype=float) * weights[None, :]
+        left = np.asarray(cp_tensor.factors[1], dtype=float)
+        right = np.asarray(cp_tensor.factors[2], dtype=float)
+
+        return _store_from_tensor_factors(
+            left,
+            right,
+            temporal,
+            self.config,
+            method="cp_als",
+            extra_diagnostics={"tensorly_backend": "parafac"},
+        )
+
+
+class TuckerHOSVDCompressor:
+    """TensorLy Tucker-ALS baseline projected back into the store format."""
+
+    def __init__(self, config: SpectralCompressionConfig | None = None) -> None:
+        self.config = config or SpectralCompressionConfig()
+
+    def fit_transform(self, snapshots: list[ArrayLikeSnapshot]) -> FactorizedTemporalStore:
+        dense = _as_dense_stack(snapshots)
+        rank = min(self.config.rank, dense.shape[1], dense.shape[2])
+        try:
+            import tensorly as tl
+            from tensorly.decomposition import tucker
+        except ImportError as exc:
+            raise ImportError(
+                "TensorLy is required for TuckerHOSVDCompressor. "
+                "Install experiment dependencies with `python -m pip install -e .[experiments]`."
+            ) from exc
+
+        tucker_rank = [min(rank, dense.shape[0]), rank, rank]
+        tucker_tensor = tucker(
+            dense,
+            rank=tucker_rank,
+            n_iter_max=max(1, self.config.tensor_iterations),
+            init="svd",
+            tol=1e-6,
+            random_state=self.config.random_seed,
+        )
+        reconstructed = np.asarray(tl.tucker_to_tensor(tucker_tensor), dtype=float)
+        left, right, temporal = _initialize_tensor_factors(reconstructed, rank)
+        return _store_from_tensor_factors(
+            left,
+            right,
+            temporal,
+            self.config,
+            method="tucker_als",
+            extra_diagnostics={
+                "tensorly_backend": "tucker",
+                "tucker_core_shape": list(tucker_tensor.core.shape),
+            },
+        )
+
+
+class RPCASVDCompressor:
+    """Dense matrix PCP-RPCA on the temporal mean followed by SVD."""
+
+    def __init__(self, config: SpectralCompressionConfig | None = None) -> None:
+        self.config = config or SpectralCompressionConfig()
+
+    def fit_transform(self, snapshots: list[ArrayLikeSnapshot]) -> FactorizedTemporalStore:
+        dense = _as_dense_stack(snapshots)
+        rank = min(self.config.rank, dense.shape[1], dense.shape[2])
+        mean_snapshot = dense.mean(axis=0)
+        mean_low_rank, sparse_error, diagnostics = _principal_component_pursuit(
+            mean_snapshot,
+            tol=self.config.rpca_tol,
+            max_iterations=self.config.rpca_iterations,
+        )
+        sparse_nnz = int(np.count_nonzero(np.abs(sparse_error) > 1e-12))
+        left_full, singular_values, right_t_full = np.linalg.svd(
+            mean_low_rank,
+            full_matrices=False,
+        )
+        left = left_full[:, :rank]
+        right = right_t_full[:rank, :].T
+        lambdas = singular_values[:rank].copy()
+        safe_lambdas = np.where(np.abs(lambdas) > 1e-12, lambdas, 1.0)
+        temporal = np.empty((dense.shape[0], rank), dtype=float)
+        for t, snapshot in enumerate(dense):
+            temporal[t] = np.einsum("ij,ij->j", left, snapshot @ right) / safe_lambdas
+
+        return FactorizedTemporalStore(
+            left=left,
+            right=right,
+            temporal=temporal,
+            lambdas=lambdas,
+            threshold_diagnostics={
+                "tensor_method": "rpca_svd",
+                "rpca_backend": "matrix_pcp_admm",
+                "rpca_iterations": int(self.config.rpca_iterations),
+                "rpca_tol": float(self.config.rpca_tol),
+                "rpca_sparse_nnz": sparse_nnz,
+                "rpca_iterations_mean": float(diagnostics["iterations"]),
+                "rpca_iterations_max": int(diagnostics["iterations"]),
+                "rpca_relative_residual_mean": float(diagnostics["relative_residual"]),
+                "requested_rank": int(self.config.rank),
+                "effective_rank": int(rank),
+            },
         )
 
 
@@ -178,6 +443,15 @@ def _factorize_from_basis(
         projected = np.einsum("ij,ij->j", left, snapshot @ right)
         temporal[t] = projected / safe_lambdas
 
+    left, right, temporal, lambdas, pruning_diagnostics = _apply_rank_pruning(
+        dense_snapshots,
+        left,
+        right,
+        temporal,
+        lambdas,
+        config,
+    )
+
     store_residuals: tuple[sparse.csr_matrix, ...] = residuals or ()
     if residuals is None and config.residual_threshold is not None:
         residual_matrices = []
@@ -189,12 +463,14 @@ def _factorize_from_basis(
             residual_matrices.append(sparse.csr_matrix(residual))
         store_residuals = tuple(residual_matrices)
 
+    threshold_diagnostics = pruning_diagnostics if pruning_diagnostics else None
     return FactorizedTemporalStore(
         left=left,
         right=right,
         temporal=temporal,
         lambdas=lambdas,
         residuals=store_residuals,
+        threshold_diagnostics=threshold_diagnostics,
     )
 
 
@@ -203,15 +479,352 @@ def _truncated_left_singular_vectors(matrix: np.ndarray, rank: int) -> np.ndarra
     return left_full[:, :rank]
 
 
+def _truncated_sparse_left_singular_vectors(
+    matrix: sparse.spmatrix,
+    rank: int,
+    random_seed: int,
+) -> np.ndarray:
+    left, _singular_values, _right_t = _truncated_sparse_svd(matrix, rank, random_seed)
+    return left
+
+
+def _truncated_sparse_svd(
+    matrix: sparse.spmatrix,
+    rank: int,
+    random_seed: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    rank = min(rank, min(matrix.shape))
+    if rank <= 0:
+        raise ValueError("rank must be positive")
+    if rank >= min(matrix.shape):
+        left_full, _singular_values, _right_t_full = np.linalg.svd(
+            matrix.toarray(),
+            full_matrices=False,
+        )
+        return left_full[:, :rank], _singular_values[:rank], _right_t_full[:rank]
+
+    left, singular_values, _right_t = svds(
+        matrix.astype(float),
+        k=rank,
+        which="LM",
+        random_state=random_seed,
+    )
+    order = np.argsort(-singular_values)
+    return left[:, order], singular_values[order], _right_t[order]
+
+
+def _mean_sparse_snapshots(
+    snapshots: list[sparse.csr_matrix],
+    indices: np.ndarray,
+) -> sparse.csr_matrix:
+    if indices.size == 0:
+        raise ValueError("cannot average an empty snapshot split")
+    total = sparse.csr_matrix(snapshots[0].shape, dtype=float)
+    for index in indices:
+        total = total + snapshots[int(index)]
+    return (total / float(indices.size)).tocsr()
+
+
+def _split_triangular_sparse_matrix(
+    first_mean: sparse.spmatrix,
+    second_mean: sparse.spmatrix,
+) -> sparse.csr_matrix:
+    upper = sparse.triu(first_mean, k=1, format="csr")
+    lower = sparse.tril(second_mean, k=-1, format="csr")
+    diagonal = sparse.diags(
+        0.5 * (first_mean.diagonal() + second_mean.diagonal()),
+        offsets=0,
+        shape=first_mean.shape,
+        format="csr",
+    )
+    return (upper + lower + diagonal).tocsr()
+
+
+def _principal_component_pursuit(
+    matrix: np.ndarray,
+    *,
+    tol: float,
+    max_iterations: int,
+) -> tuple[np.ndarray, np.ndarray, dict[str, float | int]]:
+    data = np.asarray(matrix, dtype=float)
+    rows, cols = data.shape
+    regularization = 1.0 / np.sqrt(max(rows, cols))
+    one_norm = max(float(np.sum(np.abs(data))), 1e-12)
+    mu = rows * cols / (4.0 * one_norm)
+    low_rank = np.zeros_like(data)
+    sparse_part = np.zeros_like(data)
+    dual = np.zeros_like(data)
+    data_norm = max(float(np.linalg.norm(data, ord="fro")), 1e-12)
+    relative_residual = float("inf")
+    iterations = max(1, int(max_iterations))
+
+    for iteration in range(iterations):
+        low_rank = _svd_threshold(data - sparse_part + dual / mu, 1.0 / mu)
+        sparse_part = _soft_threshold(data - low_rank + dual / mu, regularization / mu)
+        residual = data - low_rank - sparse_part
+        dual = dual + mu * residual
+        relative_residual = float(np.linalg.norm(residual, ord="fro") / data_norm)
+        if relative_residual < tol:
+            iterations = iteration + 1
+            break
+
+    return low_rank, sparse_part, {
+        "iterations": iterations,
+        "relative_residual": relative_residual,
+        "mu": mu,
+        "lambda": regularization,
+    }
+
+
+def _svd_threshold(matrix: np.ndarray, threshold: float) -> np.ndarray:
+    left, singular_values, right_t = np.linalg.svd(matrix, full_matrices=False)
+    shrunk = np.maximum(singular_values - threshold, 0.0)
+    keep = shrunk > 0.0
+    if not np.any(keep):
+        return np.zeros_like(matrix)
+    return (left[:, keep] * shrunk[keep]) @ right_t[keep]
+
+
+def _soft_threshold(matrix: np.ndarray, threshold: float) -> np.ndarray:
+    return np.sign(matrix) * np.maximum(np.abs(matrix) - threshold, 0.0)
+
+
 def _project_temporal_weights(
-    dense_snapshots: np.ndarray,
+    dense_snapshots: list[ArrayLikeSnapshot] | np.ndarray,
     left: np.ndarray,
     right: np.ndarray,
 ) -> np.ndarray:
-    temporal = np.empty((dense_snapshots.shape[0], left.shape[1]), dtype=float)
+    temporal = np.empty((len(dense_snapshots), left.shape[1]), dtype=float)
     for t, snapshot in enumerate(dense_snapshots):
         temporal[t] = np.einsum("ij,ij->j", left, snapshot @ right)
     return temporal
+
+
+def _project_temporal_weights_with_lambdas(
+    dense_snapshots: np.ndarray,
+    left: np.ndarray,
+    right: np.ndarray,
+    lambdas: np.ndarray,
+) -> np.ndarray:
+    projected = _project_temporal_weights(dense_snapshots, left, right)
+    safe_lambdas = np.where(np.abs(lambdas) > 1e-12, lambdas, 1.0)
+    return projected / safe_lambdas
+
+
+def _apply_rank_pruning(
+    dense_snapshots: np.ndarray,
+    left: np.ndarray,
+    right: np.ndarray,
+    temporal: np.ndarray,
+    lambdas: np.ndarray,
+    config: SpectralCompressionConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+    mode = config.rank_pruning_mode
+    if mode == "none":
+        return left, right, temporal, lambdas, {}
+    if mode != "ard_like":
+        raise ValueError(f"unsupported rank_pruning_mode: {mode}")
+    if config.rank_pruning_threshold < 0.0:
+        raise ValueError("rank_pruning_threshold must be non-negative")
+
+    min_rank = max(1, min(int(config.rank_pruning_min_rank), lambdas.shape[0]))
+    iterations = max(1, int(config.rank_pruning_iterations))
+    original_rank = int(lambdas.shape[0])
+    history: list[dict[str, Any]] = []
+    kept = np.arange(lambdas.shape[0])
+
+    for iteration in range(iterations):
+        temporal = _project_temporal_weights_with_lambdas(
+            dense_snapshots,
+            left,
+            right,
+            lambdas,
+        )
+        strengths = np.abs(lambdas) * np.sqrt(np.mean(temporal**2, axis=0))
+        max_strength = float(np.max(strengths)) if strengths.size else 0.0
+        threshold = float(config.rank_pruning_threshold * max(max_strength, 1e-12))
+        eligible = np.flatnonzero(strengths >= threshold)
+        if eligible.size < min_rank:
+            eligible = np.argsort(-strengths)[:min_rank]
+        local_kept = np.sort(eligible)
+        history.append(
+            {
+                "iteration": iteration,
+                "input_rank": int(lambdas.shape[0]),
+                "output_rank": int(local_kept.shape[0]),
+                "absolute_threshold": threshold,
+                "component_strengths": strengths.tolist(),
+                "kept_local_indices": local_kept.tolist(),
+                "kept_original_indices": kept[local_kept].tolist(),
+            }
+        )
+        if local_kept.shape[0] == lambdas.shape[0]:
+            break
+        left = left[:, local_kept]
+        right = right[:, local_kept]
+        temporal = temporal[:, local_kept]
+        lambdas = lambdas[local_kept]
+        kept = kept[local_kept]
+
+    temporal = _project_temporal_weights_with_lambdas(
+        dense_snapshots,
+        left,
+        right,
+        lambdas,
+    )
+    strengths = np.abs(lambdas) * np.sqrt(np.mean(temporal**2, axis=0))
+    max_strength = float(np.max(strengths)) if strengths.size else 0.0
+    threshold = float(config.rank_pruning_threshold * max(max_strength, 1e-12))
+    diagnostics = {
+        "rank_pruning_mode": mode,
+        "requested_rank": int(config.rank),
+        "initial_effective_rank": original_rank,
+        "effective_rank": int(lambdas.shape[0]),
+        "rank_pruning_threshold": float(config.rank_pruning_threshold),
+        "rank_pruning_absolute_threshold": threshold,
+        "rank_pruning_min_rank": int(config.rank_pruning_min_rank),
+        "rank_pruning_iterations": iterations,
+        "rank_pruning_refit": True,
+        "component_strengths": strengths.tolist(),
+        "kept_component_indices": kept.tolist(),
+        "rank_pruning_history": history,
+    }
+    return left, right, temporal, lambdas, diagnostics
+
+
+def _initialize_tensor_factors(
+    dense_snapshots: np.ndarray,
+    rank: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    source_unfolding = dense_snapshots.transpose(1, 0, 2).reshape(dense_snapshots.shape[1], -1)
+    target_unfolding = dense_snapshots.transpose(2, 0, 1).reshape(dense_snapshots.shape[2], -1)
+    left = _truncated_left_singular_vectors(source_unfolding, rank)
+    right = _truncated_left_singular_vectors(target_unfolding, rank)
+    temporal = _project_temporal_weights(dense_snapshots, left, right)
+    return left, right, temporal
+
+
+def _store_from_tensor_factors(
+    left: np.ndarray,
+    right: np.ndarray,
+    temporal: np.ndarray,
+    config: SpectralCompressionConfig,
+    *,
+    method: str,
+    extra_diagnostics: dict[str, Any] | None = None,
+) -> FactorizedTemporalStore:
+    left, right, temporal, lambdas = _normalize_tensor_components(left, right, temporal)
+    left, right, temporal, lambdas, kept = _prune_tensor_components(
+        left,
+        right,
+        temporal,
+        lambdas,
+        config,
+    )
+    return FactorizedTemporalStore(
+        left=left,
+        right=right,
+        temporal=temporal,
+        lambdas=lambdas,
+        threshold_diagnostics={
+            "tensor_method": method,
+            "requested_rank": int(config.rank),
+            "effective_rank": int(lambdas.shape[0]),
+            "tensor_rank_energy": float(config.tensor_rank_energy),
+            "tensor_min_rank": int(config.tensor_min_rank),
+            "kept_component_indices": kept.tolist(),
+            **(extra_diagnostics or {}),
+        },
+    )
+
+
+def _normalize_tensor_components(
+    left: np.ndarray,
+    right: np.ndarray,
+    temporal: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    left = left.copy()
+    right = right.copy()
+    temporal = temporal.copy()
+    lambdas = np.empty(left.shape[1], dtype=float)
+    for component in range(left.shape[1]):
+        left_norm = max(float(np.linalg.norm(left[:, component])), 1e-12)
+        right_norm = max(float(np.linalg.norm(right[:, component])), 1e-12)
+        temporal_norm = max(float(np.linalg.norm(temporal[:, component])), 1e-12)
+        left[:, component] /= left_norm
+        right[:, component] /= right_norm
+        temporal[:, component] /= temporal_norm
+        lambdas[component] = left_norm * right_norm * temporal_norm
+    return left, right, temporal, lambdas
+
+
+def _prune_tensor_components(
+    left: np.ndarray,
+    right: np.ndarray,
+    temporal: np.ndarray,
+    lambdas: np.ndarray,
+    config: SpectralCompressionConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    energy_target = float(config.tensor_rank_energy)
+    if energy_target <= 0.0 or energy_target > 1.0:
+        raise ValueError("tensor_rank_energy must be in the interval (0, 1]")
+
+    order = np.argsort(-(lambdas**2))
+    if energy_target >= 1.0:
+        keep_count = lambdas.shape[0]
+    else:
+        ordered_energy = lambdas[order] ** 2
+        total_energy = float(np.sum(ordered_energy))
+        if total_energy <= 1e-12:
+            keep_count = max(1, min(config.tensor_min_rank, lambdas.shape[0]))
+        else:
+            cumulative = np.cumsum(ordered_energy) / total_energy
+            keep_count = int(np.searchsorted(cumulative, energy_target, side="left") + 1)
+        keep_count = max(int(config.tensor_min_rank), keep_count)
+        keep_count = min(keep_count, lambdas.shape[0])
+
+    kept = np.sort(order[:keep_count])
+    return (
+        left[:, kept],
+        right[:, kept],
+        temporal[:, kept],
+        lambdas[kept],
+        kept,
+    )
+
+
+def _khatri_rao(first: np.ndarray, second: np.ndarray) -> np.ndarray:
+    columns = [
+        np.kron(first[:, component], second[:, component])
+        for component in range(first.shape[1])
+    ]
+    return np.column_stack(columns)
+
+
+def _als_update(
+    unfolding: np.ndarray,
+    design: np.ndarray,
+    first_factor: np.ndarray,
+    second_factor: np.ndarray,
+    ridge: float,
+) -> np.ndarray:
+    gram = (first_factor.T @ first_factor) * (second_factor.T @ second_factor)
+    gram = gram + ridge * np.eye(gram.shape[0])
+    return unfolding @ design @ np.linalg.pinv(gram)
+
+
+def _normalize_cp_factors(
+    left: np.ndarray,
+    right: np.ndarray,
+    temporal: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    for component in range(left.shape[1]):
+        left_norm = max(float(np.linalg.norm(left[:, component])), 1e-12)
+        right_norm = max(float(np.linalg.norm(right[:, component])), 1e-12)
+        left[:, component] /= left_norm
+        right[:, component] /= right_norm
+        temporal[:, component] *= left_norm * right_norm
+    return left, right, temporal
 
 
 def _residual_stack(dense_snapshots: np.ndarray, store: FactorizedTemporalStore) -> np.ndarray:
@@ -240,6 +853,15 @@ def _threshold_residuals(
             "hybrid_cap_active": False,
         }
 
+    base_threshold = threshold
+    threshold = float(threshold * config.residual_threshold_scale)
+    diagnostics = {
+        **diagnostics,
+        "base_threshold": base_threshold,
+        "residual_threshold_scale": float(config.residual_threshold_scale),
+        "estimated_threshold": threshold,
+    }
+
     residual_matrices = []
     for residual in residual_stack:
         separated = residual.copy()
@@ -250,7 +872,6 @@ def _threshold_residuals(
     total_entries = int(sum(residual.shape[0] * residual.shape[1] for residual in residuals))
     diagnostics = {
         **diagnostics,
-        "estimated_threshold": threshold,
         "residual_nnz": nnz,
         "residual_sparsity": float(nnz / max(total_entries, 1)),
     }

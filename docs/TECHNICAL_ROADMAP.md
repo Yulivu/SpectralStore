@@ -1,73 +1,63 @@
-# SpectralStore 技术路线差距与工程路线图
+﻿# SpectralStore 鎶€鏈矾绾垮樊璺濅笌宸ョ▼璺嚎鍥?
+鏈枃妗ｅ鐓?`SpectralStore.md`锛岃褰曞綋鍓嶄粨搴撳凡缁忓畬鎴愮殑鑳藉姏銆佽窛绂诲畬鏁存妧鏈矾绾跨殑缂哄彛銆佷紭鍏堢骇锛屼互鍙婁笅涓€闃舵楠屾敹鏍囧噯銆傚畠鐨勫畾浣嶆槸宸ョ▼璺嚎鍥撅細姣忎竴椤归兘搴旇兘琚媶鎴愬彲瀹炵幇銆佸彲娴嬭瘯銆佸彲澶嶇幇瀹為獙鐨勪换鍔°€?
+## 褰撳墠宸插畬鎴?
+- 浠撳簱缁撴瀯宸茬粡鎸夊彲璇绘€ф媶鍒嗭細`data/`銆乣scripts/`銆乣experiments/`銆乣tests/smoke/`銆?- 宸叉湁鍩虹鍥犲瓙鍖栧瓨鍌細`FactorizedTemporalStore` 瀛樺偍 `left/right/temporal/lambdas/residuals`銆?- 宸叉湁绗竴鐗堟煡璇㈠眰锛歚LINK_PROB`銆乣TOP_NEIGHBOR`銆乣TEMPORAL_TREND`銆乣ANOMALY_DETECT` 鐨勫熀纭€鎺ュ彛銆?- 宸叉湁绗竴鐗堝帇缂╁櫒锛歚AsymmetricSpectralCompressor`銆乣SymmetricSVDCompressor`銆乣DirectSVDCompressor`銆?- 宸叉湁 Bitcoin-OTC 涓嬭浇銆佸姞杞藉拰 preliminary 瀹為獙銆?- 宸叉湁 Synthetic-SBM 鐢熸垚銆佺湡鍊肩煩闃佃瘎浼板拰 preliminary 瀹為獙銆?
+## 瀹屾暣宸窛娓呭崟
 
-本文档对照 `SpectralStore.md`，记录当前仓库已经完成的能力、距离完整技术路线的缺口、优先级，以及下一阶段验收标准。它的定位是工程路线图：每一项都应能被拆成可实现、可测试、可复现实验的任务。
-
-## 当前已完成
-
-- 仓库结构已经按可读性拆分：`data/`、`scripts/`、`experiments/`、`tests/smoke/`。
-- 已有基础因子化存储：`FactorizedTemporalStore` 存储 `left/right/temporal/lambdas/residuals`。
-- 已有第一版查询层：`LINK_PROB`、`TOP_NEIGHBOR`、`TEMPORAL_TREND`、`ANOMALY_DETECT` 的基础接口。
-- 已有第一版压缩器：`AsymmetricSpectralCompressor`、`SymmetricSVDCompressor`、`DirectSVDCompressor`。
-- 已有 Bitcoin-OTC 下载、加载和 preliminary 实验。
-- 已有 Synthetic-SBM 生成、真值矩阵评估和 preliminary 实验。
-
-## 完整差距清单
-
-| 模块 | 当前状态 | 缺口 |
+| 妯″潡 | 褰撳墠鐘舵€?| 缂哄彛 |
 | --- | --- | --- |
-| 存储层 | 有内存态因子化 store 和 CSR residual 字段 | 缺 serialization、compression ratio 统计、residual 元数据、uncertainty 参数 |
-| 压缩引擎 | 有 dense mean/SVD 原型和多 split 非对称 ensemble | 缺真正张量展开、ARD/VI、鲁棒交替优化、增量更新、稀疏大图 SVD |
-| 查询层 | Q1/Q2/Q4/Q5 有基础返回 | Q3 `COMMUNITY` 缺失；Q1/Q2/Q4/Q5 缺误差返回、query optimizer、batch API |
-| 索引层 | 只有空包 | PQ/MIPS、时间索引、社区倒排索引均未实现 |
-| 误差保证 | 有经验 entrywise/Frobenius 指标 | 缺 entrywise bound、节点度参数、噪声估计、query error bound |
-| 数据层 | 有 Bitcoin-OTC 和 Synthetic-SBM | 缺 Bitcoin-Alpha、UCI、Enron、OGB、Reddit、Stack Overflow 等加载器 |
-| Baseline | 有 SymSVD/DirectSVD | 缺 NMF、CP/Tucker、BPTF、RPCA+SVD、图摘要和动态图方法 |
-| 实验 | 有两个 preliminary 实验 | `SpectralStore.md` 的 7 组正式实验大多未做 |
+| 瀛樺偍灞?| 鏈夊唴瀛樻€佸洜瀛愬寲 store 鍜?CSR residual 瀛楁 | 缂?serialization銆乧ompression ratio 缁熻銆乺esidual 鍏冩暟鎹€乽ncertainty 鍙傛暟 |
+| 鍘嬬缉寮曟搸 | 鏈?dense mean/SVD 鍘熷瀷鍜屽 split 闈炲绉?ensemble | 缂虹湡姝ｅ紶閲忓睍寮€銆丄RD/VI銆侀瞾妫掍氦鏇夸紭鍖栥€佸閲忔洿鏂般€佺█鐤忓ぇ鍥?SVD |
+| 鏌ヨ灞?| Q1/Q2/Q4/Q5 鏈夊熀纭€杩斿洖 | Q3 `COMMUNITY` 缂哄け锛決1/Q2/Q4/Q5 缂鸿宸繑鍥炪€乹uery optimizer銆乥atch API |
+| 绱㈠紩灞?| 鍙湁绌哄寘 | PQ/MIPS銆佹椂闂寸储寮曘€佺ぞ鍖哄€掓帓绱㈠紩鍧囨湭瀹炵幇 |
+| 璇樊淇濊瘉 | 鏈夌粡楠?entrywise/Frobenius 鎸囨爣 | 缂?entrywise bound銆佽妭鐐瑰害鍙傛暟銆佸櫔澹颁及璁°€乹uery error bound |
+| 鏁版嵁灞?| 鏈?Bitcoin-OTC 鍜?Synthetic-SBM | 缂?Bitcoin-Alpha銆乁CI銆丒nron銆丱GB銆丷eddit銆丼tack Overflow 绛夊姞杞藉櫒 |
+| Baseline | 鏈?SymSVD/DirectSVD | 缂?NMF銆丆P/Tucker銆丅PTF銆丷PCA+SVD銆佸浘鎽樿鍜屽姩鎬佸浘鏂规硶 |
+| 瀹為獙 | 鏈変袱涓?preliminary 瀹為獙 | `SpectralStore.md` 鐨?7 缁勬寮忓疄楠屽ぇ澶氭湭鍋?|
 
-## 优先级路线
-
+## 浼樺厛绾ц矾绾?
 - **P0: Synthetic-Attack + Robust residual**  
-  目标是做出 `SpectralStore-Full` 与 `NoRobust` 的第一组消融，让方法进入它最擅长的对抗扰动场景。
-- **P1: entrywise bound 初版**  
-  加入经验噪声估计、节点度参数和可返回的 query error bound。当前已完成第一步：MAD 自适应 residual threshold，用于避免无攻击时固定比例剥离 residual。
-- **P2: query optimizer + residual correction**  
-  让查询根据误差容忍度决定是否读取 residual。
-- **P3: PQ index + query latency experiment**  
-  将 `TOP_NEIGHBOR` 从 dense scan 推向近似 MIPS。
-- **P4: ARD rank selection**  
-  用自动秩选择替代手动 rank，并和交叉验证对比。
-- **P5: 正式大规模实验与更多 baseline**  
-  补齐 `SpectralStore.md` 的数据集、baseline 和论文级实验。
+  鐩爣鏄仛鍑?`SpectralStore-Full` 涓?`NoRobust` 鐨勭涓€缁勬秷铻嶏紝璁╂柟娉曡繘鍏ュ畠鏈€鎿呴暱鐨勫鎶楁壈鍔ㄥ満鏅€?- **P1: entrywise bound 鍒濈増**  
+  鍔犲叆缁忛獙鍣０浼拌銆佽妭鐐瑰害鍙傛暟鍜屽彲杩斿洖鐨?query error bound銆傚綋鍓嶅凡瀹屾垚绗竴姝ワ細MAD 鑷€傚簲 residual threshold锛岀敤浜庨伩鍏嶆棤鏀诲嚮鏃跺浐瀹氭瘮渚嬪墺绂?residual銆?- **P2: query optimizer + residual correction**  
+  璁╂煡璇㈡牴鎹宸蹇嶅害鍐冲畾鏄惁璇诲彇 residual銆?- **P3: PQ index + query latency experiment**  
+  灏?`TOP_NEIGHBOR` 浠?dense scan 鎺ㄥ悜杩戜技 MIPS銆?- **P4: ARD rank selection**  
+  鐢ㄨ嚜鍔ㄧЗ閫夋嫨鏇夸唬鎵嬪姩 rank锛屽苟鍜屼氦鍙夐獙璇佸姣斻€?- **P5: 姝ｅ紡澶ц妯″疄楠屼笌鏇村 baseline**  
+  琛ラ綈 `SpectralStore.md` 鐨勬暟鎹泦銆乥aseline 鍜岃鏂囩骇瀹為獙銆?
+## 涓嬩竴闃舵瀹炵幇璁″垝
 
-## 下一阶段实现计划
+涓嬩竴闃舵鑱氱劍 **椴佹鏀诲嚮瀹為獙 + Robust residual compressor**銆?
+闇€瑕佹柊澧?Synthetic-Attack 鏁版嵁鐢熸垚鑳藉姏锛?
+- 鏀寔 `random_flip`銆乣targeted_cross_community`銆乣sparse_outlier_edges`銆?- `snapshots` 琛ㄧず鍙楁敾鍑昏娴嬪浘锛宍expected_snapshots` 淇濇寔骞插噣鐪熷€笺€?- 璁板綍 attack metadata锛岀敤浜?anomaly precision/recall銆?
+闇€瑕佹柊澧?`RobustAsymmetricSpectralCompressor`锛?
+- 鍏堝仛鍒濆浣庣З浼拌銆?- 璁＄畻娈嬪樊鐭╅樀銆?- 鎸夊浐瀹氶槇鍊兼垨鍒嗕綅鏁板垎绂?sparse residual銆?- 鐢ㄥ幓 residual 鍚庣殑鐭╅樀閲嶆柊鎷熷悎銆?- 杈撳嚭 CSR residual锛屼緵 `ANOMALY_DETECT` 鍜?residual correction 浣跨敤銆?
+闇€瑕佹柊澧炲疄楠岋細
 
-下一阶段聚焦 **鲁棒攻击实验 + Robust residual compressor**。
+- 鐩綍锛歚experiments/preliminary/synthetic_attack/`
+- 鑴氭湰锛歚scripts/preliminary/run_preliminary_synthetic_attack.py`
+- 瀵规瘮锛歚spectralstore_full`銆乣spectralstore_no_robust`銆乣baseline_sym_svd`銆乣baseline_direct_svd`
+- 鎸囨爣锛歮ax entrywise error銆乵ean entrywise error銆乺elative Frobenius error銆乤nomaly precision/recall銆乺esidual sparsity/residual nnz
 
-需要新增 Synthetic-Attack 数据生成能力：
+## 楠屾敹鏍囧噯
 
-- 支持 `random_flip`、`targeted_cross_community`、`sparse_outlier_edges`。
-- `snapshots` 表示受攻击观测图，`expected_snapshots` 保持干净真值。
-- 记录 attack metadata，用于 anomaly precision/recall。
+- `pytest -p no:cacheprovider` 鍏ㄩ儴閫氳繃銆?- `python scripts/preliminary/run_preliminary_synthetic_attack.py` 鍙洿鎺ヨ繍琛屻€?- `experiments/preliminary/synthetic_attack/results/summary.md` 鍖呭惈 Full vs NoRobust vs baseline 琛ㄦ牸銆?- Synthetic-Attack 鐢熸垚鍣ㄨ繑鍥炴纭昂瀵革紝涓?attack severity 澧炲ぇ鏃舵壈鍔ㄨ竟鏁伴噺澧炲姞銆?- Robust compressor 鑳戒骇鐢?residuals锛屼笖 residual 鏁伴噺绛変簬鏃堕棿蹇収鏁般€?# 2026-04-24 System-First Update
 
-需要新增 `RobustAsymmetricSpectralCompressor`：
+Completed in the current system skeleton pass:
 
-- 先做初始低秩估计。
-- 计算残差矩阵。
-- 按固定阈值或分位数分离 sparse residual。
-- 用去 residual 后的矩阵重新拟合。
-- 输出 CSR residual，供 `ANOMALY_DETECT` 和 residual correction 使用。
+- `COMMUNITY(t)` now has a preliminary Synthetic-SBM evaluation loop with NMI and ARI.
+- Storage accounting now reports dense and CSR-sparse raw denominators plus ratios against both.
+- `TOP_NEIGHBOR` has a prototype exact factor-space MIPS index path.
+- Indexed `TOP_NEIGHBOR` now supports CSR residual candidate reranking for corrected scores.
+- A reproducible query latency microbenchmark now covers Q1/Q2/Q4/Q5 on raw dense, factorized, residual-corrected, and indexed Q2 paths.
+- `FactorizedTemporalStore` now has NPZ round-trip serialization for factors, CSR residuals, diagnostics, and bound metadata.
+- Tensor compressors now normalize component scales into `lambdas` and support energy-based effective-rank pruning via `tensor_rank_energy`.
+- The SVD compressor path now supports iterative ARD-like deterministic rank pruning, temporal refit, and effective-rank diagnostics.
+- Experiment scripts now default to YAML configs through Hydra/OmegaConf and emit `run_metadata.json` for reproducibility.
 
-需要新增实验：
+Near-term follow-up:
 
-- 目录：`experiments/preliminary/synthetic_attack/`
-- 脚本：`scripts/run_preliminary_synthetic_attack.py`
-- 对比：`spectralstore_full`、`spectralstore_no_robust`、`baseline_sym_svd`、`baseline_direct_svd`
-- 指标：max entrywise error、mean entrywise error、relative Frobenius error、anomaly precision/recall、residual sparsity/residual nnz
+- Add versioned serialization manifests before broadening benchmark scale.
+- Move CP/Tucker from dense reconstruction prototypes toward sparse/observed-edge objectives.
+- Upgrade deterministic ARD-like pruning to a posterior/VI formulation.
+- Add Hydra config groups, multirun sweep launchers, and optional MLflow/W&B tracking.
+- Keep CP/Tucker and current latency scripts marked as preliminary/prototype until the system path is stable.
 
-## 验收标准
-
-- `pytest -p no:cacheprovider` 全部通过。
-- `python scripts/run_preliminary_synthetic_attack.py` 可直接运行。
-- `experiments/preliminary/synthetic_attack/results/summary.md` 包含 Full vs NoRobust vs baseline 表格。
-- Synthetic-Attack 生成器返回正确尺寸，且 attack severity 增大时扰动边数量增加。
-- Robust compressor 能产生 residuals，且 residual 数量等于时间快照数。

@@ -1,0 +1,80 @@
+output_dir: experiments/preliminary/thinking_alignment/results_n500_t20_r3
+random_seed: 701
+data:
+  'n': 500
+  T: 20
+experiment:
+  repeats: 3
+checks:
+- split_asym_sanity
+- entrywise_bound_coverage
+- robust_sparse_corruption
+split_asym:
+  num_nodes: 500
+  num_steps: 20
+  num_communities: 4
+  p_in: 0.3
+  p_out: 0.05
+  temporal_jitter: 0.08
+  directed: true
+  rank: 4
+  num_splits: 1
+  num_repeats: 3
+  construction_tolerance: 1.0e-12
+  noise_correlation_abs_limit: 0.1
+entrywise_bound:
+  dataset: synthetic_sbm
+  num_nodes: 500
+  num_steps: 20
+  num_communities: 4
+  p_in: 0.3
+  p_out: 0.05
+  temporal_jitter: 0.08
+  directed: true
+  true_rank: 4
+  snr: 2.0
+  rank: 4
+  num_splits: 1
+  num_repeats: 3
+  bound_constant: 1.0
+  include_residual: false
+  methods:
+  - spectralstore_asym
+  - spectralstore_split_asym_unfolding
+  - sym_svd
+  - direct_svd
+  precompute_bound_methods:
+  - spectralstore_asym
+  - spectralstore_split_asym_unfolding
+  - sym_svd
+  - direct_svd
+robust_sparse_corruption:
+  num_nodes: 500
+  num_steps: 20
+  num_communities: 4
+  p_in: 0.3
+  p_out: 0.05
+  temporal_jitter: 0.08
+  directed: true
+  rank: 4
+  num_splits: 1
+  num_repeats: 3
+  corruption_modes:
+  - sparse_spike
+  - signed_spike
+  - block_sparse_spike
+  corruption_rates:
+  - 0.0
+  - 0.02
+  corruption_magnitude: 4.0
+  robust_iterations: 2
+  residual_threshold_mode: quantile
+  residual_quantile: 0.98
+  residual_mad_multiplier: 8.0
+  rpca_iterations: 20
+  methods:
+  - spectralstore_robust
+  - spectralstore_asym
+  - sym_svd
+  - direct_svd
+  - rpca_svd

@@ -1,0 +1,15 @@
+dataset: ogbl_collab
+root: data/ogb
+max_nodes: 1000
+min_year: null
+year_start: null
+max_year: null
+dense_memory_limit_gb: 4.0
+rank: 8
+test_fraction: 0.2
+negative_edges_per_positive: 20
+random_seed: 17
+methods:
+- spectralstore_asym
+- sym_svd
+- direct_svd

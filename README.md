@@ -55,10 +55,26 @@ python -m pip install -e ".[dev]"
 pytest
 ```
 
+Experiment and tensor-baseline extras can be installed with:
+
+```bash
+python -m pip install -e ".[dev,experiments]"
+```
+
 Run the tiny smoke experiment:
 
 ```bash
 python scripts/run_smoke_quickstart.py
+```
+
+Experiment scripts default to YAML configs under `experiments/**/configs/` and
+write `metrics.json`, `summary.md`, and `run_metadata.json` under the matching
+results directory.
+
+Most experiment scripts support OmegaConf overrides:
+
+```bash
+python scripts/run_preliminary_synthetic_sbm.py --set num_repeats=1 --set rank=3
 ```
 
 Download the first real dataset:
@@ -74,6 +90,18 @@ python scripts/run_preliminary_bitcoin.py
 ```
 
 Results are written under `experiments/preliminary/bitcoin_otc/results/`.
+The Bitcoin script reports storage ratios, held-out observed-edge metrics, Q4
+temporal trend checks, and residual statistics.
+
+Run the Bitcoin-OTC residual threshold sweep:
+
+```bash
+python scripts/run_bitcoin_residual_sweep.py
+```
+
+The sweep accepts robust residual settings only when compressed storage is
+smaller than raw sparse CSR storage and held-out observed-edge error does not
+regress beyond the configured tolerance.
 
 Run the preliminary Synthetic-SBM comparison:
 
@@ -98,6 +126,26 @@ python scripts/run_preliminary_synthetic_attack_sweep.py
 ```
 
 Sweep results are written to `sweep_metrics.json` and `sweep_summary.md` in the same results folder.
+
+Run the Q5 anomaly detection validation:
+
+```bash
+python scripts/run_preliminary_synthetic_attack.py
+```
+
+The Synthetic-Attack summary reports injected anomaly edges, Q5 detected edges,
+Q5 precision, and Q5 recall.
+
+Run the preliminary ogbl-collab integration:
+
+```bash
+python scripts/run_preliminary_ogbl_collab.py --set max_nodes=200
+```
+
+This uses OGB's official `LinkPropPredDataset` loader and writes results under
+`experiments/preliminary/ogbl_collab/results/`.
+The summary includes unified reconstruction, observed-edge, storage, MRR, and
+Hits metrics.
 
 Run the Synthetic-SBM entrywise-bound scaling experiment:
 
@@ -125,16 +173,24 @@ This repository is in the initial implementation phase. It currently includes:
 - an asymmetric spectral compressor,
 - multi-split asymmetric spectral ensembling,
 - a tensor-unfolding SVD compressor baseline,
+- dense CP-ALS and Tucker-HOSVD tensor baselines,
+- YAML/OmegaConf experiment configs with reproducibility metadata,
 - a first robust residual compressor,
 - adaptive MAD, fixed-quantile, and hybrid residual threshold policies,
 - configurable degree-aware empirical entrywise error bounds,
 - a first query optimizer for error-tolerant link and trend queries,
+- a first community query using time-weighted spectral embeddings,
+- storage cost and compression-ratio estimates,
 - SymSVD and DirectSVD baselines,
 - Bitcoin-OTC loading,
 - Synthetic-SBM, Synthetic-Spiked, and Synthetic-Attack generation,
 - smoke tests, preliminary real-data experiments, and preliminary synthetic experiments.
 
 The implementation roadmap is tracked in [docs/TECHNICAL_ROADMAP.md](docs/TECHNICAL_ROADMAP.md).
+Prototype and lightweight implementation choices are tracked in
+[docs/IMPLEMENTATION_NOTES.md](docs/IMPLEMENTATION_NOTES.md).
+The current implementation and experiment status is summarized in
+[docs/CURRENT_STATUS.md](docs/CURRENT_STATUS.md).
 
 ## License
 

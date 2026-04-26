@@ -1,51 +1,64 @@
-"""Run a preliminary Synthetic-Attack robust residual experiment."""
+﻿"""Run a preliminary Synthetic-Attack robust residual experiment."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from spectralstore.compression import (
     AsymmetricSpectralCompressor,
     DirectSVDCompressor,
     RobustAsymmetricSpectralCompressor,
-    SpectralCompressionConfig,
     SymmetricSVDCompressor,
+    spectral_config_from_mapping,
 )
 from spectralstore.data_loader import make_synthetic_attack
 from spectralstore.evaluation import (
     anomaly_precision_recall,
+    load_experiment_config,
     max_entrywise_error,
     mean_entrywise_error,
     residual_nnz,
     residual_sparsity,
+    q5_anomaly_detection_scores,
     relative_frobenius_error_against_dense,
+    set_reproducibility_seed,
+    write_experiment_outputs,
 )
+from spectralstore.query_engine import QueryEngine
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="experiments/preliminary/synthetic_attack/configs/default.json",
+        default="experiments/preliminary/synthetic_attack/configs/default.yaml",
     )
     parser.add_argument(
         "--out-dir",
         default="experiments/preliminary/synthetic_attack/results",
     )
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        dest="overrides",
+        help="OmegaConf dotlist override, e.g. --set num_repeats=1",
+    )
     args = parser.parse_args()
+    started_at = time.perf_counter()
 
-    config = json.loads(Path(args.config).read_text(encoding="utf-8"))
+    config = load_experiment_config(args.config, args.overrides)
+    set_reproducibility_seed(config.get("random_seed"))
     out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     per_run = []
     aggregates: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -66,26 +79,12 @@ def main() -> None:
             random_seed=seed,
         )
 
-        base_config = SpectralCompressionConfig(
-            rank=config["rank"],
+        base_config = spectral_config_from_mapping(config, random_seed=seed)
+        robust_mad_config = spectral_config_from_mapping(config, random_seed=seed)
+        robust_quantile_config = spectral_config_from_mapping(
+            config,
             random_seed=seed,
-            num_splits=config["num_splits"],
-        )
-        robust_mad_config = SpectralCompressionConfig(
-            rank=config["rank"],
-            random_seed=seed,
-            num_splits=config["num_splits"],
-            robust_iterations=config["robust_iterations"],
-            residual_threshold_mode=config.get("residual_threshold_mode", "mad"),
-            residual_mad_multiplier=config.get("residual_mad_multiplier", 45.0),
-        )
-        robust_quantile_config = SpectralCompressionConfig(
-            rank=config["rank"],
-            random_seed=seed,
-            num_splits=config["num_splits"],
-            robust_iterations=config["robust_iterations"],
             residual_threshold_mode="quantile",
-            residual_quantile=config["residual_quantile"],
         )
         methods = {
             "spectralstore_full_mad": RobustAsymmetricSpectralCompressor(robust_mad_config),
@@ -99,6 +98,11 @@ def main() -> None:
         for name, compressor in methods.items():
             store = compressor.fit_transform(dataset.snapshots)
             precision, recall = anomaly_precision_recall(dataset.attack_edges, store)
+            q5_scores = q5_anomaly_detection_scores(
+                dataset.attack_edges,
+                QueryEngine(store),
+                threshold=config["q5_threshold"],
+            )
             values = {
                 "max_entrywise_error": max_entrywise_error(dataset.expected_snapshots, store),
                 "mean_entrywise_error": mean_entrywise_error(dataset.expected_snapshots, store),
@@ -108,6 +112,7 @@ def main() -> None:
                 ),
                 "anomaly_precision": precision,
                 "anomaly_recall": recall,
+                **q5_scores,
                 "residual_nnz": float(residual_nnz(store)),
                 "residual_sparsity": residual_sparsity(store),
             }
@@ -126,17 +131,22 @@ def main() -> None:
             "num_communities": config["num_communities"],
             "num_repeats": config["num_repeats"],
             "rank": config["rank"],
+            "q5_threshold": config["q5_threshold"],
         },
         "aggregates": summarize_aggregates(aggregates),
         "per_run": per_run,
     }
 
-    (out_dir / "metrics.json").write_text(
-        json.dumps(metrics, indent=2, ensure_ascii=False),
-        encoding="utf-8",
+    summary = render_summary(metrics)
+    write_experiment_outputs(
+        out_dir=out_dir,
+        metrics=metrics,
+        summary=summary,
+        config_path=args.config,
+        config=config,
+        started_at=started_at,
     )
-    (out_dir / "summary.md").write_text(render_summary(metrics), encoding="utf-8")
-    print(render_summary(metrics))
+    print(summary)
 
 
 def summarize_aggregates(
@@ -166,9 +176,10 @@ def render_summary(metrics: dict) -> str:
         f"- communities: {dataset['num_communities']}",
         f"- repeats: {dataset['num_repeats']}",
         f"- rank: {dataset['rank']}",
+        f"- Q5 threshold: {dataset['q5_threshold']}",
         "",
-        "| method | max entrywise | mean entrywise | rel. Frobenius | anomaly P | anomaly R | residual nnz | residual sparsity |",
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| method | max entrywise | mean entrywise | rel. Frobenius | injected | Q5 detected | Q5 P | Q5 R | residual nnz | residual sparsity |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for method, metric_values in metrics["aggregates"].items():
         lines.append(
@@ -177,8 +188,10 @@ def render_summary(metrics: dict) -> str:
             f"{format_mean_std(metric_values['max_entrywise_error'])} | "
             f"{format_mean_std(metric_values['mean_entrywise_error'])} | "
             f"{format_mean_std(metric_values['relative_frobenius_error'])} | "
-            f"{format_mean_std(metric_values['anomaly_precision'])} | "
-            f"{format_mean_std(metric_values['anomaly_recall'])} | "
+            f"{format_mean_std(metric_values['injected_anomaly_edges'])} | "
+            f"{format_mean_std(metric_values['q5_detected_edges'])} | "
+            f"{format_mean_std(metric_values['q5_precision'])} | "
+            f"{format_mean_std(metric_values['q5_recall'])} | "
             f"{format_mean_std(metric_values['residual_nnz'])} | "
             f"{format_mean_std(metric_values['residual_sparsity'])} |"
         )
@@ -192,3 +205,4 @@ def format_mean_std(values: dict[str, float]) -> str:
 
 if __name__ == "__main__":
     main()
+

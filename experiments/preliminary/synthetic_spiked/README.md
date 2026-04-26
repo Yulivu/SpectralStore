@@ -1,8 +1,8 @@
 # Preliminary Synthetic-Spiked Experiment
 
-Goal: evaluate spectral and tensor-unfolding compressors on a Gaussian spiked
-matrix model, which is closer to the entrywise-bound theory setting than
-Bernoulli SBM observations.
+Goal: evaluate spectral and tensor baselines on a Gaussian spiked matrix model,
+which is closer to the entrywise-bound theory setting than Bernoulli SBM
+observations.
 
 Outputs:
 

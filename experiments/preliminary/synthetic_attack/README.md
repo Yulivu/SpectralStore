@@ -29,6 +29,9 @@ Current interpretation:
 - Random flips and targeted cross-community edges are structural perturbations;
   they need future graph-aware robustification rather than only magnitude-based
   residual thresholding.
+- Residual separation should be judged by both anomaly precision/recall and
+  storage cost. The sweep now reports compressed-vs-raw-sparse ratios so
+  residual recovery does not hide an uncontrolled CSR storage blow-up.
 
 Outputs:
 
@@ -36,3 +39,7 @@ Outputs:
 - `results/summary.md`: compact comparison table
 - `results/sweep_metrics.json`: robustness sweep metrics
 - `results/sweep_summary.md`: robustness sweep tables
+
+Q5 validation is part of the preliminary script. The summary reports injected
+anomaly edges, Q5 detected edges, Q5 precision, and Q5 recall. A Q5 run is not
+considered validated unless those four fields are present.

@@ -1,48 +1,64 @@
-"""Run a controlled Synthetic-SBM comparison."""
+﻿"""Run a controlled Synthetic-SBM comparison."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from spectralstore.compression import (
     AsymmetricSpectralCompressor,
+    CPALSCompressor,
     DirectSVDCompressor,
-    SpectralCompressionConfig,
     SymmetricSVDCompressor,
     TensorUnfoldingSVDCompressor,
+    TuckerHOSVDCompressor,
+    spectral_config_from_mapping,
 )
 from spectralstore.data_loader import make_temporal_sbm
 from spectralstore.evaluation import (
+    community_clustering_scores,
+    load_experiment_config,
     max_entrywise_error,
     mean_entrywise_error,
+    percentile_entrywise_error,
     relative_frobenius_error_against_dense,
+    set_reproducibility_seed,
+    write_experiment_outputs,
 )
+from spectralstore.query_engine import QueryEngine
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="experiments/preliminary/synthetic_sbm/configs/default.json",
+        default="experiments/preliminary/synthetic_sbm/configs/default.yaml",
     )
     parser.add_argument(
         "--out-dir",
         default="experiments/preliminary/synthetic_sbm/results",
     )
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        dest="overrides",
+        help="OmegaConf dotlist override, e.g. --set num_repeats=1",
+    )
     args = parser.parse_args()
+    started_at = time.perf_counter()
 
-    config = json.loads(Path(args.config).read_text(encoding="utf-8"))
+    config = load_experiment_config(args.config, args.overrides)
+    set_reproducibility_seed(config.get("random_seed"))
     out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     per_run = []
     aggregates: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
@@ -60,14 +76,12 @@ def main() -> None:
             random_seed=seed,
         )
 
-        compressor_config = SpectralCompressionConfig(
-            rank=config["rank"],
-            random_seed=seed,
-            num_splits=config.get("num_splits", 1),
-        )
+        compressor_config = spectral_config_from_mapping(config, random_seed=seed)
         methods = {
             "spectralstore_asym": AsymmetricSpectralCompressor(compressor_config),
             "tensor_unfolding_svd": TensorUnfoldingSVDCompressor(compressor_config),
+            "cp_als": CPALSCompressor(compressor_config),
+            "tucker_hosvd": TuckerHOSVDCompressor(compressor_config),
             "baseline_sym_svd": SymmetricSVDCompressor(compressor_config),
             "baseline_direct_svd": DirectSVDCompressor(compressor_config),
         }
@@ -75,12 +89,41 @@ def main() -> None:
         run_result = {"repeat": repeat, "seed": seed, "methods": {}}
         for name, compressor in methods.items():
             store = compressor.fit_transform(dataset.snapshots)
+            community_labels = QueryEngine(store).community(
+                0,
+                num_communities=config["num_communities"],
+                random_seed=seed,
+            )
+            community_scores = community_clustering_scores(
+                dataset.communities,
+                community_labels,
+            )
             values = {
                 "max_entrywise_error": max_entrywise_error(dataset.expected_snapshots, store),
+                "p95_entrywise_error": percentile_entrywise_error(
+                    dataset.expected_snapshots,
+                    store,
+                    95.0,
+                ),
+                "p99_entrywise_error": percentile_entrywise_error(
+                    dataset.expected_snapshots,
+                    store,
+                    99.0,
+                ),
                 "mean_entrywise_error": mean_entrywise_error(dataset.expected_snapshots, store),
                 "relative_frobenius_error": relative_frobenius_error_against_dense(
                     dataset.expected_snapshots,
                     store,
+                ),
+                "compression_ratio": store.compression_ratio(),
+                "community_nmi": community_scores["community_nmi"],
+                "community_ari": community_scores["community_ari"],
+                "compressed_bytes": float(store.compressed_bytes()),
+                "raw_dense_bytes": float(store.raw_dense_bytes()),
+                "raw_sparse_bytes": float(store.raw_sparse_csr_bytes(dataset.snapshots)),
+                "compressed_vs_raw_dense_ratio": store.compressed_vs_raw_dense_ratio(),
+                "compressed_vs_raw_sparse_ratio": store.compressed_vs_raw_sparse_ratio(
+                    dataset.snapshots,
                 ),
             }
             run_result["methods"][name] = values
@@ -102,12 +145,16 @@ def main() -> None:
         "per_run": per_run,
     }
 
-    (out_dir / "metrics.json").write_text(
-        json.dumps(metrics, indent=2, ensure_ascii=False),
-        encoding="utf-8",
+    summary = render_summary(metrics)
+    write_experiment_outputs(
+        out_dir=out_dir,
+        metrics=metrics,
+        summary=summary,
+        config_path=args.config,
+        config=config,
+        started_at=started_at,
     )
-    (out_dir / "summary.md").write_text(render_summary(metrics), encoding="utf-8")
-    print(render_summary(metrics))
+    print(summary)
 
 
 def summarize_aggregates(
@@ -137,16 +184,39 @@ def render_summary(metrics: dict) -> str:
         f"- rank: {dataset['rank']}",
         f"- asymmetric split ensemble: {dataset['num_splits']}",
         "",
-        "| method | max entrywise | mean entrywise | relative Frobenius |",
-        "| --- | ---: | ---: | ---: |",
+        "| method | max entrywise | p95 entrywise | p99 entrywise | mean entrywise | "
+        "relative Frobenius | community NMI | community ARI |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
     ]
     for method, metric_values in metrics["aggregates"].items():
         lines.append(
             "| "
             f"{method} | "
             f"{format_mean_std(metric_values['max_entrywise_error'])} | "
+            f"{format_mean_std(metric_values['p95_entrywise_error'])} | "
+            f"{format_mean_std(metric_values['p99_entrywise_error'])} | "
             f"{format_mean_std(metric_values['mean_entrywise_error'])} | "
-            f"{format_mean_std(metric_values['relative_frobenius_error'])} |"
+            f"{format_mean_std(metric_values['relative_frobenius_error'])} | "
+            f"{format_mean_std(metric_values['community_nmi'])} | "
+            f"{format_mean_std(metric_values['community_ari'])} |"
+        )
+    lines.extend(
+        [
+            "",
+            "| method | compressed bytes | raw dense bytes | raw sparse bytes | "
+            "ratio vs dense | ratio vs sparse |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for method, metric_values in metrics["aggregates"].items():
+        lines.append(
+            "| "
+            f"{method} | "
+            f"{format_mean_std(metric_values['compressed_bytes'])} | "
+            f"{format_mean_std(metric_values['raw_dense_bytes'])} | "
+            f"{format_mean_std(metric_values['raw_sparse_bytes'])} | "
+            f"{format_mean_std(metric_values['compressed_vs_raw_dense_ratio'])} | "
+            f"{format_mean_std(metric_values['compressed_vs_raw_sparse_ratio'])} |"
         )
     lines.append("")
     return "\n".join(lines)
@@ -158,3 +228,4 @@ def format_mean_std(values: dict[str, float]) -> str:
 
 if __name__ == "__main__":
     main()
+

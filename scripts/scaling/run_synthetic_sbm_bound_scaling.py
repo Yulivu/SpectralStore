@@ -1,35 +1,40 @@
-"""Run Synthetic-SBM empirical entrywise-bound scaling experiments."""
+﻿"""Run Synthetic-SBM empirical entrywise-bound scaling experiments."""
 
 from __future__ import annotations
 
 import argparse
-import json
 import math
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from spectralstore.compression import (
     AsymmetricSpectralCompressor,
+    CPALSCompressor,
     DirectSVDCompressor,
     RobustAsymmetricSpectralCompressor,
-    SpectralCompressionConfig,
     SymmetricSVDCompressor,
     TensorUnfoldingSVDCompressor,
+    TuckerHOSVDCompressor,
+    spectral_config_from_mapping,
 )
 from spectralstore.data_loader import make_temporal_sbm
 from spectralstore.evaluation import (
     entrywise_bound_coverage,
+    load_experiment_config,
     max_entrywise_error,
     max_entrywise_error_bound,
     mean_entrywise_error,
     mean_entrywise_error_bound,
     relative_frobenius_error_against_dense,
+    set_reproducibility_seed,
+    write_experiment_outputs,
 )
 
 
@@ -37,17 +42,25 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="experiments/preliminary/synthetic_sbm/configs/bound_scaling.json",
+        default="experiments/preliminary/synthetic_sbm/configs/bound_scaling.yaml",
     )
     parser.add_argument(
         "--out-dir",
         default="experiments/preliminary/synthetic_sbm/results",
     )
+    parser.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        dest="overrides",
+        help="OmegaConf dotlist override, e.g. --set num_repeats=1",
+    )
     args = parser.parse_args()
+    started_at = time.perf_counter()
 
-    config = json.loads(Path(args.config).read_text(encoding="utf-8"))
+    config = load_experiment_config(args.config, args.overrides)
+    set_reproducibility_seed(config.get("random_seed"))
     out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
 
     scaling_results = []
     for mode in ("sweep_n", "sweep_t"):
@@ -71,15 +84,18 @@ def main() -> None:
         "scaling": scaling_results,
     }
 
-    (out_dir / "bound_scaling_metrics.json").write_text(
-        json.dumps(metrics, indent=2, ensure_ascii=False),
-        encoding="utf-8",
+    summary = render_summary(metrics)
+    write_experiment_outputs(
+        out_dir=out_dir,
+        metrics=metrics,
+        summary=summary,
+        config_path=args.config,
+        config=config,
+        started_at=started_at,
+        metrics_filename="bound_scaling_metrics.json",
+        summary_filename="bound_scaling_summary.md",
     )
-    (out_dir / "bound_scaling_summary.md").write_text(
-        render_summary(metrics),
-        encoding="utf-8",
-    )
-    print(render_summary(metrics))
+    print(summary)
 
 
 def run_one_setting(config: dict, mode: str, num_nodes: int, num_steps: int) -> dict:
@@ -99,28 +115,19 @@ def run_one_setting(config: dict, mode: str, num_nodes: int, num_steps: int) -> 
             random_seed=seed,
         )
 
-        base_config = SpectralCompressionConfig(
-            rank=config["rank"],
-            random_seed=seed,
-            num_splits=config["num_splits"],
-        )
+        base_config = spectral_config_from_mapping(config, random_seed=seed)
         methods = {
             "spectralstore_asym": AsymmetricSpectralCompressor(base_config),
             "tensor_unfolding_svd": TensorUnfoldingSVDCompressor(base_config),
+            "cp_als": CPALSCompressor(base_config),
+            "tucker_hosvd": TuckerHOSVDCompressor(base_config),
             "sym_svd": SymmetricSVDCompressor(base_config),
             "direct_svd": DirectSVDCompressor(base_config),
         }
         for coverage in config.get("entrywise_bound_coverages", [1.0]):
-            robust_config = SpectralCompressionConfig(
-                rank=config["rank"],
+            robust_config = spectral_config_from_mapping(
+                config,
                 random_seed=seed,
-                num_splits=config["num_splits"],
-                robust_iterations=config["robust_iterations"],
-                residual_threshold_mode=config["residual_threshold_mode"],
-                residual_mad_multiplier=config["residual_mad_multiplier"],
-                residual_quantile=config["residual_quantile"],
-                residual_hybrid_tail_quantile=config["residual_hybrid_tail_quantile"],
-                residual_hybrid_tail_ratio=config["residual_hybrid_tail_ratio"],
                 entrywise_bound_coverage=coverage,
             )
             methods[f"full_hybrid_cov{int(round(coverage * 100))}"] = (
@@ -220,10 +227,11 @@ def render_mode_table(metrics: dict, mode: str) -> list[str]:
     lines = [
         f"## {title}",
         "",
-        "| n | T | theory scale | asym max err | tensor max err | sym max err | "
-        "cov100 mean bound | cov99 mean bound | cov95 mean bound | cov95 coverage | "
-        "cov95 tightness |",
-        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+        "| n | T | theory scale | asym max err | tensor max err | cp max err | "
+        "tucker max err | sym max err | cov100 mean bound | cov99 mean bound | "
+        "cov95 mean bound | cov95 coverage | cov95 tightness |",
+        "| ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | "
+        "---: | ---: | ---: |",
     ]
     for result in metrics["scaling"]:
         if result["mode"] != mode:
@@ -239,6 +247,8 @@ def render_mode_table(metrics: dict, mode: str) -> list[str]:
             f"{result['theory_scale']:.4f} | "
             f"{format_mean_std(aggregates['spectralstore_asym']['max_entrywise_error'])} | "
             f"{format_mean_std(aggregates['tensor_unfolding_svd']['max_entrywise_error'])} | "
+            f"{format_mean_std(aggregates['cp_als']['max_entrywise_error'])} | "
+            f"{format_mean_std(aggregates['tucker_hosvd']['max_entrywise_error'])} | "
             f"{format_mean_std(aggregates['sym_svd']['max_entrywise_error'])} | "
             f"{format_mean_std(cov100['mean_entrywise_bound'])} | "
             f"{format_mean_std(cov99['mean_entrywise_bound'])} | "
@@ -256,3 +266,4 @@ def format_mean_std(values: dict[str, float]) -> str:
 
 if __name__ == "__main__":
     main()
+
