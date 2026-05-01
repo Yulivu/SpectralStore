@@ -1,8 +1,0 @@
-{
-  "dataset": "bitcoin_otc",
-  "raw_path": "data/raw/soc-sign-bitcoinotc.csv.gz",
-  "max_nodes": 300,
-  "rank": 8,
-  "test_fraction": 0.2,
-  "random_seed": 7
-}

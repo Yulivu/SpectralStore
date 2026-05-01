@@ -35,8 +35,8 @@ FIELDNAMES = [
     "held_out_rmse_with_residual",
     "train_frobenius_factor_only",
     "train_frobenius_with_residual",
-    "storage_ratio_factor_only",
-    "storage_ratio_with_residual",
+    "compressed_vs_raw_sparse_ratio_factor_only",
+    "compressed_vs_raw_sparse_ratio_with_residual",
     "factor_bytes",
     "residual_bytes",
     "metadata_bytes",
@@ -53,7 +53,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="experiments/preliminary/bitcoin_otc/configs/default.yaml",
+        required=True,
+        help="Path to experiment YAML config.",
     )
     parser.add_argument("--out-dir", default="experiments/results/exp2")
     parser.add_argument("--min-rank", type=int, default=2)
@@ -117,8 +118,10 @@ def main() -> None:
                     store,
                     include_residual=True,
                 ),
-                "storage_ratio_factor_only": factor_bytes / max(raw_sparse_bytes, 1),
-                "storage_ratio_with_residual": compressed_bytes / max(raw_sparse_bytes, 1),
+                "compressed_vs_raw_sparse_ratio_factor_only": factor_bytes
+                / max(raw_sparse_bytes, 1),
+                "compressed_vs_raw_sparse_ratio_with_residual": compressed_bytes
+                / max(raw_sparse_bytes, 1),
                 "factor_bytes": factor_bytes,
                 "residual_bytes": residual_bytes,
                 "metadata_bytes": metadata_bytes,

@@ -44,7 +44,37 @@ def load_bitcoin_otc(
 
     SNAP rows are `source,target,rating,time`. Ratings are in `[-10, 10]`.
     """
+    return _load_bitcoin_signed(
+        path,
+        dataset_name="bitcoin_otc",
+        max_nodes=max_nodes,
+        normalize_ratings=normalize_ratings,
+    )
 
+
+def load_bitcoin_alpha(
+    path: str | Path,
+    *,
+    max_nodes: int = 300,
+    normalize_ratings: bool = True,
+) -> TemporalGraphDataset:
+    """Load Bitcoin-Alpha as monthly signed weighted snapshots."""
+    return _load_bitcoin_signed(
+        path,
+        dataset_name="bitcoin_alpha",
+        max_nodes=max_nodes,
+        normalize_ratings=normalize_ratings,
+    )
+
+
+def _load_bitcoin_signed(
+    path: str | Path,
+    *,
+    dataset_name: str,
+    max_nodes: int,
+    normalize_ratings: bool,
+) -> TemporalGraphDataset:
+    """Load SNAP signed-trust temporal graph (Bitcoin OTC/Alpha)."""
     rows = _read_rows(Path(path))
     degree = Counter[int]()
     for source, target, _rating, _timestamp in rows:
@@ -74,7 +104,7 @@ def load_bitcoin_otc(
         snapshots.append(matrix)
 
     return TemporalGraphDataset(
-        name="bitcoin_otc",
+        name=dataset_name,
         snapshots=snapshots,
         node_ids=node_ids,
         time_bins=time_bins,

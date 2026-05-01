@@ -1,4 +1,4 @@
-﻿"""Download datasets used by SpectralStore experiments."""
+"""Download datasets used by SpectralStore experiments."""
 
 from __future__ import annotations
 
@@ -11,7 +11,11 @@ DATASETS = {
     "bitcoin_otc": {
         "url": "https://snap.stanford.edu/data/soc-sign-bitcoinotc.csv.gz",
         "path": Path("data/raw/soc-sign-bitcoinotc.csv.gz"),
-    }
+    },
+    "bitcoin_alpha": {
+        "url": "https://snap.stanford.edu/data/soc-sign-bitcoinalpha.csv.gz",
+        "path": Path("data/raw/soc-sign-bitcoinalpha.csv.gz"),
+    },
 }
 
 

@@ -263,13 +263,15 @@ def relative_frobenius_error_against_dense(
 
 
 def residual_nnz(store: FactorizedTemporalStore) -> int:
+    if hasattr(store.residuals, "nnz"):
+        return int(store.residuals.nnz)
     return int(sum(residual.nnz for residual in store.residuals))
 
 
 def residual_sparsity(store: FactorizedTemporalStore) -> float:
     if not store.residuals:
         return 0.0
-    total_entries = sum(residual.shape[0] * residual.shape[1] for residual in store.residuals)
+    total_entries = store.num_steps * store.num_nodes * store.right.shape[0]
     return float(residual_nnz(store) / max(total_entries, 1))
 
 
@@ -279,8 +281,8 @@ def anomaly_precision_recall(
 ) -> tuple[float, float]:
     truth = set(attack_edges)
     predicted: set[tuple[int, int, int]] = set()
-    for t, residual in enumerate(store.residuals):
-        coo = residual.tocoo()
+    for t in range(store.num_steps):
+        coo = store.residual_snapshot(t).tocoo()
         predicted.update((t, int(row), int(col)) for row, col in zip(coo.row, coo.col))
 
     if not predicted:
@@ -302,8 +304,8 @@ def anomaly_precision_recall_f1(
     """Evaluate residual-stored anomaly detections against sparse corruption truth."""
     truth = set(attack_edges)
     predicted: set[tuple[int, int, int]] = set()
-    for t, residual in enumerate(store.residuals):
-        coo = residual.tocoo()
+    for t in range(store.num_steps):
+        coo = store.residual_snapshot(t).tocoo()
         predicted.update((t, int(row), int(col)) for row, col in zip(coo.row, coo.col))
 
     true_positives = len(predicted & truth)

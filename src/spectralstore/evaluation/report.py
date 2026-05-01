@@ -70,17 +70,37 @@ def split_observed_edges(
 def storage_report(
     store: FactorizedTemporalStore,
     snapshots: list[sparse.spmatrix],
+    *,
+    factor_dtype_bytes: int | None = None,
 ) -> dict[str, float | int]:
-    return {
-        "factor_bytes": store.factor_bytes(),
+    report = {
+        "factor_bytes": store.factor_bytes(dtype_bytes=factor_dtype_bytes),
+        "factor_bytes_in_memory": store.factor_bytes(),
         "residual_bytes": store.residual_bytes(),
         "metadata_bytes": store.metadata_bytes(),
-        "compressed_bytes": store.compressed_bytes(),
+        "compressed_bytes": store.compressed_bytes(factor_dtype_bytes=factor_dtype_bytes),
         "raw_dense_bytes": store.raw_dense_bytes(),
         "raw_sparse_bytes": store.raw_sparse_csr_bytes(snapshots),
-        "compressed_vs_raw_dense_ratio": store.compressed_vs_raw_dense_ratio(),
-        "compressed_vs_raw_sparse_ratio": store.compressed_vs_raw_sparse_ratio(snapshots),
+        "compressed_vs_raw_dense_ratio": store.compressed_vs_raw_dense_ratio(
+            factor_dtype_bytes=factor_dtype_bytes,
+        ),
+        "compressed_vs_raw_sparse_ratio": store.compressed_vs_raw_sparse_ratio(
+            snapshots,
+            factor_dtype_bytes=factor_dtype_bytes,
+        ),
     }
+    if factor_dtype_bytes is None:
+        report["factor_bytes_float32"] = store.factor_bytes(dtype_bytes=4)
+        report["compressed_bytes_factor_float32"] = store.compressed_bytes(
+            factor_dtype_bytes=4,
+        )
+        report["compressed_vs_raw_dense_ratio_factor_float32"] = (
+            store.compressed_vs_raw_dense_ratio(factor_dtype_bytes=4)
+        )
+        report["compressed_vs_raw_sparse_ratio_factor_float32"] = (
+            store.compressed_vs_raw_sparse_ratio(snapshots, factor_dtype_bytes=4)
+        )
+    return report
 
 
 def reconstruction_report(

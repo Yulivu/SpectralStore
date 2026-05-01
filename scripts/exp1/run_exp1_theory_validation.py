@@ -57,7 +57,8 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--config",
-        default="experiments/exp1_theory_validation/configs/default.yaml",
+        required=True,
+        help="Path to experiment YAML config.",
     )
     parser.add_argument("--out-dir", default=None)
     parser.add_argument("--pilot", action="store_true")

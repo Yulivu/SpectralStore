@@ -377,6 +377,77 @@ def make_synthetic_attack(
     )
 
 
+def inject_sparse_corruption(
+    dataset: SyntheticTemporalGraph,
+    *,
+    attack_kind: str = "sparse_spike",
+    corruption_rate: float = 0.02,
+    corruption_magnitude: float = 4.0,
+    directed: bool = True,
+    random_seed: int = 0,
+) -> SyntheticTemporalGraph:
+    """Inject sparse corruption into an existing synthetic temporal graph."""
+
+    if dataset.communities is None:
+        raise ValueError("inject_sparse_corruption requires dataset.communities")
+
+    rng = np.random.default_rng(random_seed)
+    possible_pairs = _candidate_pairs(dataset.communities, attack_kind, directed=directed)
+    attacks_per_step = int(round(float(corruption_rate) * len(possible_pairs)))
+    attacked_snapshots: list[sparse.csr_matrix] = []
+    attack_edges: list[tuple[int, int, int]] = []
+    corruption_masks: list[sparse.csr_matrix] = []
+
+    for t, snapshot in enumerate(dataset.snapshots):
+        dense = snapshot.toarray().astype(float, copy=True)
+        chosen = _sample_attack_pairs(
+            rng,
+            possible_pairs,
+            attacks_per_step,
+            attack_kind=attack_kind,
+            communities=dataset.communities,
+        )
+        mask = np.zeros(dense.shape, dtype=bool)
+        for u, v in chosen:
+            if attack_kind == "sparse_outlier_edges":
+                dense[u, v] = float(corruption_magnitude)
+            elif attack_kind == "sparse_spike":
+                dense[u, v] += float(corruption_magnitude)
+            elif attack_kind == "signed_spike":
+                dense[u, v] += rng.choice([-1.0, 1.0]) * float(corruption_magnitude)
+            elif attack_kind == "block_sparse_spike":
+                dense[u, v] += float(corruption_magnitude)
+            elif attack_kind == "random_flip":
+                dense[u, v] = 1.0 - dense[u, v]
+            elif attack_kind == "targeted_cross_community":
+                dense[u, v] = 1.0
+            else:
+                raise ValueError(f"unsupported attack_kind: {attack_kind}")
+            mask[u, v] = True
+            attack_edges.append((t, int(u), int(v)))
+
+            if not directed:
+                dense[v, u] = dense[u, v]
+                mask[v, u] = True
+                attack_edges.append((t, int(v), int(u)))
+
+        attacked_snapshots.append(sparse.csr_matrix(dense))
+        corruption_masks.append(sparse.csr_matrix(mask.astype(float)))
+
+    return SyntheticTemporalGraph(
+        name=f"{dataset.name}_corrupted",
+        snapshots=attacked_snapshots,
+        expected_snapshots=dataset.expected_snapshots,
+        communities=dataset.communities,
+        node_ids=dataset.node_ids,
+        time_bins=dataset.time_bins,
+        attack_edges=tuple(attack_edges),
+        attack_kind=attack_kind,
+        held_out_edges=dataset.held_out_edges,
+        corruption_masks=tuple(corruption_masks),
+    )
+
+
 def _candidate_pairs(
     communities: np.ndarray,
     attack_kind: str,

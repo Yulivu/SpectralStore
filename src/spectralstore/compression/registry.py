@@ -7,6 +7,7 @@ from dataclasses import fields
 from typing import Any, Mapping
 
 from spectralstore.compression.spectral import (
+    AlternatingRobustAsymmetricSpectralCompressor,
     AsymmetricSpectralCompressor,
     CPALSCompressor,
     DirectSVDCompressor,
@@ -26,6 +27,8 @@ CompressorFactory = Callable[[SpectralCompressionConfig], object]
 
 COMPRESSOR_REGISTRY: dict[str, CompressorFactory] = {
     "spectralstore_asym": AsymmetricSpectralCompressor,
+    "spectralstore_asym_alternating_robust": AlternatingRobustAsymmetricSpectralCompressor,
+    "spectralstore_asym_alt_robust": AlternatingRobustAsymmetricSpectralCompressor,
     "spectralstore_unfolding_asym": SparseUnfoldingAsymmetricCompressor,
     "spectralstore_split_asym_unfolding": SplitAsymmetricUnfoldingCompressor,
     "spectralstore_robust": RobustAsymmetricSpectralCompressor,

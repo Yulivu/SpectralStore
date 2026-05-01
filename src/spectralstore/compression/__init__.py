@@ -1,7 +1,11 @@
 """Compression primitives for SpectralStore."""
 
-from spectralstore.compression.factorized_store import FactorizedTemporalStore
+from spectralstore.compression.factorized_store import (
+    FactorizedTemporalStore,
+    TemporalCOOResidualStore,
+)
 from spectralstore.compression.spectral import (
+    AlternatingRobustAsymmetricSpectralCompressor,
     AsymmetricSpectralCompressor,
     CPALSCompressor,
     DirectSVDCompressor,
@@ -24,6 +28,7 @@ from spectralstore.compression.registry import (
 
 __all__ = [
     "AsymmetricSpectralCompressor",
+    "AlternatingRobustAsymmetricSpectralCompressor",
     "COMPRESSOR_REGISTRY",
     "CPALSCompressor",
     "DirectSVDCompressor",
@@ -35,6 +40,7 @@ __all__ = [
     "SparseUnfoldingAsymmetricCompressor",
     "SpectralCompressionConfig",
     "SymmetricSVDCompressor",
+    "TemporalCOOResidualStore",
     "TensorUnfoldingSVDCompressor",
     "TuckerHOSVDCompressor",
     "available_compressors",
