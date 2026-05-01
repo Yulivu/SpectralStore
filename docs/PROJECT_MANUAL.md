@@ -1,6 +1,6 @@
 # SpectralStore Project Manual
 
-Last updated: 2026-04-30
+Last updated: 2026-05-01
 
 This is the single engineering + planning manual for SpectralStore. It merges
 the previous status, roadmap, implementation notes, and project completion
@@ -123,13 +123,12 @@ Implemented loaders/generators:
 
 ## 5. Experiment Framework Contract
 
-All main scripts use YAML/OmegaConf config loading and support dotlist overrides.
-Standard outputs:
+All active main scripts use YAML/OmegaConf config loading and support dotlist overrides.
+Primary output contract:
 
-- `metrics.json`
-- `summary.md`
-- `resolved_config.yaml`
-- `run_metadata.json`
+- `exp1`: `results.csv`, plots, `metrics.json`, `summary.md`, `resolved_config.yaml`, `run_metadata.json`
+- `exp2`: sweep CSV files + plots + markdown summaries
+- `exp4`: `raw_records.csv`, `summary.csv`, and robustness plots
 
 Common features:
 
@@ -179,10 +178,20 @@ python -c "import spectralstore; print('spectralstore import ok')"
 Representative command patterns:
 
 ```powershell
-python scripts/exp1/run_exp1_theory_validation.py --config <config.yaml>
-python scripts/exp2/run_bitcoin_compression_ratio_sweep.py --config <config.yaml>
-python scripts/exp2/run_bitcoin_compression_ratio_sweep_rmse.py --config <config.yaml>
-python scripts/exp4/run_synthetic_attack_random.py --out-dir experiments/results/exp4/random_attack
+python scripts/data/download_dataset.py bitcoin_otc
+python scripts/exp1/run_exp1_theory_validation.py --config experiments/configs/exp1/theory_validation.yaml
+python scripts/exp2/run_bitcoin_compression_ratio_sweep.py --config experiments/configs/exp2/bitcoin_sweep.yaml
+python scripts/exp2/run_bitcoin_compression_ratio_sweep_rmse.py --config experiments/configs/exp2/bitcoin_sweep_rmse.yaml
+python scripts/exp2/run_bitcoin_residual_boundary_sweep.py --config experiments/configs/exp2/bitcoin_residual_boundary.yaml
+python scripts/exp4/run_synthetic_attack_random.py --config experiments/configs/exp4/random_attack.yaml
+python scripts/exp4/run_synthetic_attack_targeted.py --config experiments/configs/exp4/targeted_attack.yaml
+```
+
+HPC long-run pattern:
+
+```bash
+screen -S spectralstore
+python scripts/exp1/run_exp1_theory_validation.py --config experiments/configs/exp1/theory_validation.yaml > /root/autodl-tmp/spectral_outputs/exp1.log 2>&1
 ```
 
 ## 9. Baseline Policy
@@ -198,3 +207,12 @@ Current baseline strategy:
 
 - none at policy level; scope is controlled by available compute and reproducibility.
 - near-term focus remains offline compressor quality rather than online incremental updates.
+
+## 11. Rerun Policy After Mechanism Changes
+
+- rerun the core matrix (`exp1`, `exp2`, `exp4`) whenever the compressor mechanism changes materially.
+- keep old result directories as historical diagnostics only; do not use them as final evidence.
+- keep claims split by evidence type:
+  - system evidence from reproducible pipeline and outputs,
+  - method evidence from rerun matrix metrics,
+  - diagnostic evidence from focused failure/ablation checks.

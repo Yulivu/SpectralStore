@@ -24,7 +24,11 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from spectralstore.compression import create_compressor, spectral_config_from_mapping  # noqa: E402
 from spectralstore.data_loader import make_synthetic_attack  # noqa: E402
-from spectralstore.evaluation import max_entrywise_error  # noqa: E402
+from spectralstore.evaluation import (  # noqa: E402
+    load_experiment_config,
+    max_entrywise_error,
+    set_reproducibility_seed,
+)
 
 
 METHODS = [
@@ -57,22 +61,22 @@ SUMMARY_FIELDNAMES = [
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--out-dir", default="experiments/results/exp4/random_attack")
-    parser.add_argument("--num-nodes", type=int, default=1000)
-    parser.add_argument("--num-steps", type=int, default=20)
-    parser.add_argument("--num-communities", type=int, default=3)
-    parser.add_argument("--p-in", type=float, default=0.30)
-    parser.add_argument("--p-out", type=float, default=0.05)
-    parser.add_argument("--rank", type=int, default=5)
-    parser.add_argument("--num-repeats", type=int, default=5)
-    parser.add_argument("--rpca-iterations", type=int, default=100)
+    parser.add_argument(
+        "--config",
+        required=True,
+        help="Path to experiment YAML config.",
+    )
+    parser.add_argument("--out-dir", default=None)
+    parser.add_argument("--set", action="append", default=[], dest="overrides")
     args = parser.parse_args()
+    config = load_experiment_config(args.config, args.overrides)
+    set_reproducibility_seed(config.get("random_seed"))
 
-    out_dir = Path(args.out_dir)
+    out_dir = Path(args.out_dir or config.get("output_dir", "experiments/results/exp4/random_attack"))
     out_dir.mkdir(parents=True, exist_ok=True)
 
     raw_path = out_dir / "raw_records.csv"
-    raw_rows = run_sweep(args, raw_path)
+    raw_rows = run_sweep(config, raw_path)
     summary_rows = summarize(raw_rows)
 
     summary_path = out_dir / "summary.csv"
@@ -98,7 +102,7 @@ def main() -> None:
 
 
 def run_sweep(
-    args: argparse.Namespace,
+    run_cfg: dict,
     raw_path: Path,
 ) -> list[dict[str, float | int | str]]:
     rows = read_raw_rows(raw_path)
@@ -106,33 +110,35 @@ def run_sweep(
         (round(float(row["epsilon"]), 10), str(row["method"]), int(row["repeat"]))
         for row in rows
     }
-    total_repeats = int(args.num_repeats)
+    total_repeats = int(run_cfg["num_repeats"])
+    base_seed = int(run_cfg.get("random_seed", 0))
     for epsilon in EPSILONS:
         for repeat in range(total_repeats):
+            seed = base_seed + repeat
             dataset = make_synthetic_attack(
-                num_nodes=args.num_nodes,
-                num_steps=args.num_steps,
-                num_communities=args.num_communities,
-                p_in=args.p_in,
-                p_out=args.p_out,
+                num_nodes=run_cfg["num_nodes"],
+                num_steps=run_cfg["num_steps"],
+                num_communities=run_cfg["num_communities"],
+                p_in=run_cfg["p_in"],
+                p_out=run_cfg["p_out"],
                 attack_kind="random_flip",
                 attack_fraction=epsilon,
                 directed=True,
-                random_seed=repeat,
+                random_seed=seed,
             )
             for method in METHODS:
                 key = (round(float(epsilon), 10), method, repeat)
                 if key in completed:
                     continue
                 started_at = time.perf_counter()
-                config = spectral_config_from_mapping(
+                compressor_config = spectral_config_from_mapping(
                     {
-                        "rank": args.rank,
-                        "random_seed": repeat,
-                        "rpca_iterations": args.rpca_iterations,
+                        "rank": run_cfg["rank"],
+                        "random_seed": seed,
+                        "rpca_iterations": run_cfg["rpca_iterations"],
                     }
                 )
-                store = create_compressor(method, config).fit_transform(dataset.snapshots)
+                store = create_compressor(method, compressor_config).fit_transform(dataset.snapshots)
                 runtime = time.perf_counter() - started_at
                 row = {
                     "epsilon": epsilon,
@@ -146,8 +152,8 @@ def run_sweep(
                     "nmi": community_nmi_from_left(
                         store.left,
                         dataset.communities,
-                        num_communities=args.num_communities,
-                        random_seed=repeat,
+                        num_communities=run_cfg["num_communities"],
+                        random_seed=seed,
                     ),
                     "runtime": runtime,
                 }

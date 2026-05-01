@@ -1,0 +1,27 @@
+output_dir: experiments/results/exp1_v2/restart_baseline
+random_seed: 2026
+rank: 5
+num_splits: 1
+num_repeats: 3
+methods:
+  - spectralstore_asym
+  - spectralstore_robust
+  - sym_svd
+  - direct_svd
+sbm:
+  n_values: [500, 1000, 2000]
+  fixed_t: 20
+  t_values: [10, 20, 40]
+  fixed_n: 1000
+  num_communities: 5
+  p_in: 0.20
+  p_out: 0.05
+  temporal_jitter: 0.08
+  directed: true
+  low_snr:
+    p_in: 0.15
+    p_out: 0.10
+spiked:
+  fixed_n: 1000
+  fixed_t: 20
+  snr_values: [0.5, 1.0, 2.0, 4.0]

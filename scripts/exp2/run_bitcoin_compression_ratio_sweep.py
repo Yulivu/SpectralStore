@@ -66,7 +66,7 @@ def main() -> None:
         required=True,
         help="Path to experiment YAML config.",
     )
-    parser.add_argument("--out-dir", default="experiments/results/exp2")
+    parser.add_argument("--out-dir", default=None)
     parser.add_argument("--min-rank", type=int, default=2)
     parser.add_argument("--max-rank", type=int, default=20)
     parser.add_argument("--rank-step", type=int, default=2)
@@ -75,7 +75,7 @@ def main() -> None:
 
     config = load_experiment_config(args.config, args.overrides)
     set_reproducibility_seed(config.get("random_seed"))
-    out_dir = Path(args.out_dir)
+    out_dir = Path(args.out_dir or config.get("output_dir", "experiments/results/exp2"))
     out_dir.mkdir(parents=True, exist_ok=True)
 
     dataset = load_bitcoin_otc(config["raw_path"], max_nodes=config["max_nodes"])

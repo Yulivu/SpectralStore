@@ -1,0 +1,10 @@
+output_dir: experiments/results/exp4/random_attack
+random_seed: 2026
+num_nodes: 1000
+num_steps: 20
+num_communities: 3
+p_in: 0.30
+p_out: 0.05
+rank: 5
+num_repeats: 5
+rpca_iterations: 100

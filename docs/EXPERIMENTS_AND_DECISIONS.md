@@ -1,6 +1,6 @@
 # SpectralStore Experiments and Decisions
 
-Last updated: 2026-04-30
+Last updated: 2026-05-01
 
 This document is the single source for experiment registry, key metrics,
 decision gates, and action items. It merges former experiment logs, progress
@@ -10,6 +10,7 @@ reports, checklist docs, and estimator decision memos.
 
 | Topic | Directory | Primary artifacts |
 | --- | --- | --- |
+| Active rerun config set | `experiments/configs/` | `exp1/`, `exp2/`, `exp4/` YAMLs |
 | Exp1-v2 theory regime (iid) | `experiments/results/exp1_v2/standard/` | `exp1_v2_theory_regime.csv`, `summary.md` |
 | Exp1-v2 theory regime (hetero) | `experiments/results/exp1_v2/hetero/` | `exp1_v2_theory_regime.csv`, `summary.md` |
 | Exp2 Bitcoin storage sweep | `experiments/results/exp2/` | `sweep_results.csv`, `sweep_results_rmse.csv` |
@@ -23,8 +24,8 @@ reports, checklist docs, and estimator decision memos.
 | Sparse-native robust smoke | `experiments/results/sparse_path_smoke_robust/` | `metrics.json`, `summary.md` |
 | Sparse-path local scaling | `experiments/results/sparse_scaling/` | scaling CSV + summaries |
 
-Legacy Exp1 folders are diagnostic only and should not be cited as current
-theory evidence.
+Legacy directories are diagnostic only and should not be cited as current
+theory evidence after mechanism-level updates.
 
 ## 2. Current Evidence Summary
 
@@ -152,11 +153,14 @@ Main checks:
 
 ```powershell
 python -c "import spectralstore; print('spectralstore import ok')"
-python scripts/exp1/run_exp1_theory_validation.py --config <config.yaml>
-python scripts/exp1/run_lowsnr_diagnostic.py --config <config.yaml>
-python scripts/exp2/run_bitcoin_compression_ratio_sweep.py --config <config.yaml>
-python scripts/exp2/run_bitcoin_compression_ratio_sweep_rmse.py --config <config.yaml>
-python scripts/exp4/run_synthetic_attack_random.py --out-dir experiments/results/exp4/random_attack
+python scripts/data/download_dataset.py bitcoin_otc
+python scripts/exp1/run_exp1_theory_validation.py --config experiments/configs/exp1/theory_validation.yaml
+python scripts/exp1/run_lowsnr_diagnostic.py
+python scripts/exp2/run_bitcoin_compression_ratio_sweep.py --config experiments/configs/exp2/bitcoin_sweep.yaml
+python scripts/exp2/run_bitcoin_compression_ratio_sweep_rmse.py --config experiments/configs/exp2/bitcoin_sweep_rmse.yaml
+python scripts/exp2/run_bitcoin_residual_boundary_sweep.py --config experiments/configs/exp2/bitcoin_residual_boundary.yaml
+python scripts/exp4/run_synthetic_attack_random.py --config experiments/configs/exp4/random_attack.yaml
+python scripts/exp4/run_synthetic_attack_targeted.py --config experiments/configs/exp4/targeted_attack.yaml
 ```
 
 ## 8. Next Actions
@@ -165,3 +169,5 @@ python scripts/exp4/run_synthetic_attack_random.py --out-dir experiments/results
    diagnostics.
 2. keep robust calibration in accepted region and report invalid region clearly.
 3. continue direct iterations on asym + ARD + robust unified loop and rerun the matrix after each substantive mechanism change.
+4. for new HPC sessions, run the active YAML set under `experiments/configs/`
+   before reusing historical result folders in summaries.

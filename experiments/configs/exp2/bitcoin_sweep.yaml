@@ -1,0 +1,10 @@
+output_dir: experiments/results/exp2/restart_baseline
+raw_path: data/raw/soc-sign-bitcoinotc.csv.gz
+max_nodes: 300
+random_seed: 2026
+rank_selection_mode: fixed
+num_splits: 1
+residual_threshold_mode: quantile
+residual_percentile: 0.9998
+storage_gate_action: diagnostic
+max_sparse_ratio: 1.0

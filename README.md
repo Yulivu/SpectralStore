@@ -52,31 +52,37 @@ docs/               Project manual and decisions
 ```powershell
 python -m pip install -e ".[dev]"
 python -c "import spectralstore; print('spectralstore import ok')"
+python scripts/data/download_dataset.py bitcoin_otc
 ```
 
 Run representative experiments:
 
 ```powershell
-python scripts/exp1/run_exp1_theory_validation.py --config <path-to-config.yaml>
-python scripts/exp2/run_bitcoin_compression_ratio_sweep.py --config <path-to-config.yaml>
-python scripts/exp4/run_synthetic_attack_random.py --out-dir experiments/results/exp4/random_attack
+python scripts/exp1/run_exp1_theory_validation.py --config experiments/configs/exp1/theory_validation.yaml
+python scripts/exp2/run_bitcoin_compression_ratio_sweep.py --config experiments/configs/exp2/bitcoin_sweep.yaml
+python scripts/exp2/run_bitcoin_compression_ratio_sweep_rmse.py --config experiments/configs/exp2/bitcoin_sweep_rmse.yaml
+python scripts/exp4/run_synthetic_attack_random.py --config experiments/configs/exp4/random_attack.yaml
 ```
 
-All main experiment scripts write:
+For targeted attack:
 
-- `metrics.json`
-- `summary.md`
-- `resolved_config.yaml`
-- `run_metadata.json`
+```powershell
+python scripts/exp4/run_synthetic_attack_targeted.py --config experiments/configs/exp4/targeted_attack.yaml
+```
+
+Primary outputs by script family:
+
+- `exp1`: `results.csv`, plots, `metrics.json`, `summary.md`, `resolved_config.yaml`, `run_metadata.json`
+- `exp2`: sweep CSV files + plots + markdown summaries
+- `exp4`: `raw_records.csv`, `summary.csv`, and robustness plots
 
 ## Current Snapshot
 
 - Phase 0/1/2/3 core objectives are completed.
-- Sparse-native path is implemented for main SVD/robust compressors and has
-  smoke-scale evidence.
-- Robust storage gate and `compressed_vs_raw_sparse_ratio` workflow are in place.
-- Asym mechanism is implemented and audited, but not yet a stable winner over
-  `sym_svd` on current theory-regime evidence.
+- Current active rerun matrix is `exp1 + exp2 + exp4` with YAML configs under
+  `experiments/configs/`.
+- Historical results remain useful as diagnostics, but publication-facing
+  claims should be regenerated with the current compressor implementation.
 
 ## License
 
