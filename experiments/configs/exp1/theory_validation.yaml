@@ -1,13 +1,13 @@
-output_dir: experiments/results/exp1_v2/restart_baseline
+output_dir: experiments/results/exp1/mainline
 random_seed: 2026
 rank: 5
 num_splits: 1
 num_repeats: 3
 methods:
-  - spectralstore_asym
-  - spectralstore_robust
+  - spectralstore_thinking
   - sym_svd
   - direct_svd
+  - tensor_unfolding_svd
 sbm:
   n_values: [500, 1000, 2000]
   fixed_t: 20

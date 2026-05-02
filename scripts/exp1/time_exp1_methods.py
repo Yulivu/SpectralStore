@@ -29,7 +29,7 @@ def main() -> None:
     parser.add_argument(
         "--methods",
         nargs="+",
-        default=["spectralstore_asym", "sym_svd", "direct_svd", "cp_als"],
+        default=["spectralstore_thinking", "sym_svd", "direct_svd", "tensor_unfolding_svd"],
     )
     args = parser.parse_args()
 

@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from spectralstore.compression import (  # noqa: E402
-    available_compressors,
     create_compressor,
     spectral_config_from_mapping,
 )
@@ -83,7 +82,7 @@ def main() -> None:
         random_seed=config["random_seed"],
     )
     ranks = list(range(args.min_rank, args.max_rank + 1, args.rank_step))
-    methods = list(available_compressors())
+    methods = list(config.get("methods", ["spectralstore_thinking"]))
 
     rows = []
     for rank in ranks:

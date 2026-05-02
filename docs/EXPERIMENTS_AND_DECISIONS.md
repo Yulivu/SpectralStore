@@ -1,6 +1,6 @@
 # SpectralStore Experiments and Decisions
 
-Last updated: 2026-05-01
+Last updated: 2026-05-02
 
 This document is the single source for experiment registry, key metrics,
 decision gates, and action items. It merges former experiment logs, progress
@@ -10,11 +10,12 @@ reports, checklist docs, and estimator decision memos.
 
 | Topic | Directory | Primary artifacts |
 | --- | --- | --- |
-| Active rerun config set | `experiments/configs/` | `exp1/`, `exp2/`, `exp4/` YAMLs |
-| Exp1-v2 theory regime (iid) | `experiments/results/exp1_v2/standard/` | `exp1_v2_theory_regime.csv`, `summary.md` |
-| Exp1-v2 theory regime (hetero) | `experiments/results/exp1_v2/hetero/` | `exp1_v2_theory_regime.csv`, `summary.md` |
-| Exp2 Bitcoin storage sweep | `experiments/results/exp2/` | `sweep_results.csv`, `sweep_results_rmse.csv` |
-| Exp3 query latency/index | `experiments/results/query_latency/` | `metrics.json`, `summary.md` |
+| Active rerun config set | `experiments/configs/` | `exp1/`, `exp2/`, `exp3/`, `exp4/`, `exp4_v2/`, `exp5/` YAMLs |
+| Exp1 theory validation | `experiments/results/exp1/mainline/` | `results.csv`, plots, `metrics.json`, `summary.md` |
+| Exp2 Bitcoin storage sweep | `experiments/results/exp2/mainline/` | `sweep_results.csv`, `sweep_results_rmse.csv`, residual-boundary CSV |
+| Exp3 query/index benchmark | `experiments/results/exp3/query_benchmark/` | `query_records.csv`, `summary.csv`, `metrics.json`, `summary.md` |
+| Exp4_v2 residual-query robustness | `experiments/results/exp4_v2/residual_query_robustness/` | `raw_records.csv`, `summary.csv`, `metrics.json`, `summary.md` |
+| Exp5 ARD diagnostic | `experiments/results/exp5/ard_diagnostic/` | ARD diagnostic CSVs + summaries |
 | Phase3 real-data residual calibration | `experiments/results/phase3_realdata/` | `phase3_metrics.json`, `phase3_summary.md`, `phase3_candidates.csv` |
 | Asym temporal dependence | `experiments/results/exp_asym_temporal_dependence/` | `exp_asym_temporal_dependence.csv`, `summary.md` |
 | Asym mechanism audit | `experiments/results/asym_mechanism_audit_full/` | `asym_mechanism_audit.csv`, `summary.md` |
@@ -29,24 +30,31 @@ theory evidence after mechanism-level updates.
 
 ## 2. Current Evidence Summary
 
-### 2.1 Theory and Mechanism (Exp1-v2 + audits)
+### 2.1 Theory and Mechanism
 
-- asym construction is real (non-symmetric matrix, U/V gap, output asymmetry).
-- split-asym and current asym path are often nearly equivalent unless mechanism
-  settings are changed.
-- in completed Exp1-v2 runs, asym is not stably better than `sym_svd` on mean
-  max-entrywise error and variance.
-- temporal-correlation tests show weak mean-ratio improvement trend at high
-  `alpha`, but variance ratio remains above 1.
+- current paper-facing method is `spectralstore_thinking`.
+- historical `spectralstore_asym`, `spectralstore_robust`, split/unfolding, and
+  alternating diagnostic variants have been removed from the public registry.
+- existing historical results are diagnostic only. Claim-bearing evidence must be
+  regenerated under `experiments/results/exp1/mainline`,
+  `experiments/results/exp2/mainline`, `experiments/results/exp3/query_benchmark`,
+  `experiments/results/exp4_v2/residual_query_robustness`, and
+  `experiments/results/exp5/ard_diagnostic`.
+- previous negative evidence remains useful as a warning: asymmetry alone did not
+  reliably beat `sym_svd`; the current hypothesis is specifically the unified
+  mode-3 + asym + ARD + robust loop.
 
 ### 2.2 System Contribution (Exp2/Exp3/Phase3)
 
-- Exp3 demonstrates query-path tradeoff with raw/factor/residual/index/cache.
+- Exp3 demonstrates query-path tradeoff with factor/residual/index paths.
+- Exp4_v2 is the current claim-bearing robustness experiment for residual anomaly
+  capture and Q1/Q4/Q5 correction.
 - robust residual path provides practical correction capability, but storage must
   be controlled with explicit sparse-ratio gate.
 - Exp2 field naming is normalized to `compressed_vs_raw_sparse_ratio`.
-- invalid compression region is explicitly marked where
-  `storage_gate_accepted=false`.
+- invalid compression region is explicitly marked where `storage_gate_accepted=false`.
+- `storage_gate_accepted` denotes the final post-action storage state; before-action
+  diagnostics are preserved separately.
 
 ### 2.3 Robust Residual + Storage Control
 
@@ -72,7 +80,7 @@ Implemented fixes:
 - factor dtype accounting (`factor_storage_dtype_bytes`).
 - storage regime sweep script and explicit invalid-region reporting.
 
-### 3.2 Latest local robust calibration (sparse-path scaling)
+### 3.2 Historical local robust calibration (diagnostic only)
 
 Baseline robust (before drop gate), `density=0.0008`:
 
@@ -97,25 +105,30 @@ Interpretation:
 - but error increases due to residual dropping,
 - this is a controlled storage/accuracy tradeoff, not a bug.
 
-## 4. Asym Evidence Baseline
+## 4. Removed Historical SpectralStore Variants
 
-Historical baseline observations:
+Removed variants:
 
-- baseline runs (`asym_decision_gate_main`) reported mean error ratio around `1.018` and variance ratio around `2.697`.
-- H1 mechanism (`num_splits=8`) improved both metrics directionally to mean ratio around `1.002` and variance ratio around `2.016`.
+- `spectralstore_asym`
+- `spectralstore_robust`
+- `spectralstore_unfolding_asym`
+- `spectralstore_split_asym_unfolding`
+- `spectralstore_asym_alternating_robust` / alias
 
 Current policy:
 
-- treat these numbers as starting evidence, not as stop conditions.
-- continue mechanism redesign and reruns under the Thinking-theory-aligned roadmap.
-- evaluate each new iteration with the same metric set for direct comparability.
+- do not rerun or cite these variants as current SpectralStore methods.
+- use `spectralstore_thinking` for the paper method.
+- use stable external baselines (`sym_svd`, `direct_svd`, `tensor_unfolding_svd`,
+  `nmf`, `rpca_svd`, CP/Tucker when dependencies are available) for comparison.
 
 ## 5. Sparse-Native Execution Status
 
 Completed:
 
-- sparse-native support for `spectralstore_asym`, `spectralstore_robust`,
-  `sym_svd`, `direct_svd`.
+- sparse-native baseline support for `sym_svd` and `direct_svd`.
+- mainline `spectralstore_thinking` remains dense-stack based pending a
+  correctness-preserving sparse mode.
 - regression tests for bypassing dense stack in sparse mode.
 - local and robust smoke outputs generated.
 - scaling runner and local/HPC configs added.
@@ -138,14 +151,14 @@ Allowed claims:
 
 - system framework and reproducibility pipeline are implemented.
 - robust sparse-corruption recovery is strong in compliant checks.
-- asym construction/mechanism exists and is audited.
+- `spectralstore_thinking` implements the audited mode-3 + asym + ARD + robust offline loop.
 - query bound and threshold defaults are empirically calibrated.
 
 Disallowed claims:
 
-- asym is stably better than `sym_svd` without matching evidence in the current run matrix.
+- `spectralstore_thinking` is stably better than `sym_svd` without matching evidence in the current run matrix.
 - calibrated defaults are universal constants.
-- Exp4 random/targeted attack replaces strict sparse-corruption evidence.
+- legacy Exp4 random/targeted/injection attack replaces Exp4_v2 residual-query evidence.
 
 ## 7. Repro Command Index
 
@@ -159,8 +172,26 @@ python scripts/exp1/run_lowsnr_diagnostic.py
 python scripts/exp2/run_bitcoin_compression_ratio_sweep.py --config experiments/configs/exp2/bitcoin_sweep.yaml
 python scripts/exp2/run_bitcoin_compression_ratio_sweep_rmse.py --config experiments/configs/exp2/bitcoin_sweep_rmse.yaml
 python scripts/exp2/run_bitcoin_residual_boundary_sweep.py --config experiments/configs/exp2/bitcoin_residual_boundary.yaml
+python scripts/exp3/run_query_benchmark.py --config experiments/configs/exp3/query_benchmark.yaml
+python scripts/exp4_v2/run_residual_query_robustness.py --config experiments/configs/exp4_v2/residual_query_robustness.yaml
 python scripts/exp4/run_synthetic_attack_random.py --config experiments/configs/exp4/random_attack.yaml
 python scripts/exp4/run_synthetic_attack_targeted.py --config experiments/configs/exp4/targeted_attack.yaml
+python scripts/exp4/run_synthetic_attack_injection.py --config experiments/configs/exp4/injection_attack.yaml
+python scripts/exp5/run_ard_diagnostic.py --config experiments/configs/exp5/ard_diagnostic.yaml
+python scripts/exp5/run_ard_rank_selection.py --config experiments/configs/exp5/ard_rank_selection.yaml
+```
+
+AutoDL/HPC system-direction rerun:
+
+```bash
+bash scripts/hpc/run_system_direction.sh
+```
+
+AutoDL/HPC mainline rerun:
+
+```bash
+bash scripts/hpc/init_hpc.sh
+bash scripts/hpc/run_all_mainline.sh
 ```
 
 ## 8. Next Actions
@@ -168,6 +199,7 @@ python scripts/exp4/run_synthetic_attack_targeted.py --config experiments/config
 1. continue sparse-native path to larger scales (`50K+`) with explicit memory/run
    diagnostics.
 2. keep robust calibration in accepted region and report invalid region clearly.
-3. continue direct iterations on asym + ARD + robust unified loop and rerun the matrix after each substantive mechanism change.
-4. for new HPC sessions, run the active YAML set under `experiments/configs/`
-   before reusing historical result folders in summaries.
+3. continue direct iterations on `spectralstore_thinking` and rerun the matrix after each substantive mechanism change.
+4. for new HPC sessions, follow [docs/AUTODL_RUNBOOK.md](AUTODL_RUNBOOK.md) and
+   run `scripts/hpc/run_all_mainline.sh` before reusing historical result
+   folders in summaries.

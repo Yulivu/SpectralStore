@@ -31,13 +31,7 @@ from spectralstore.evaluation import (  # noqa: E402
 )
 
 
-METHODS = [
-    "spectralstore_robust",
-    "spectralstore_asym",
-    "sym_svd",
-    "direct_svd",
-    "rpca_svd",
-]
+DEFAULT_METHODS = ["spectralstore_thinking", "sym_svd", "direct_svd", "rpca_svd"]
 EPSILONS = [0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30]
 RAW_FIELDNAMES = [
     "epsilon",
@@ -76,7 +70,8 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     raw_path = out_dir / "raw_records.csv"
-    raw_rows = run_sweep(config, raw_path)
+    methods = list(config.get("methods", DEFAULT_METHODS))
+    raw_rows = run_sweep(config, raw_path, methods)
     summary_rows = summarize(raw_rows)
 
     summary_path = out_dir / "summary.csv"
@@ -86,24 +81,27 @@ def main() -> None:
         metric="max_entrywise",
         ylabel="max entrywise error vs M_star",
         output_path=out_dir / "max_entrywise_vs_epsilon.png",
+        methods=methods,
     )
     plot_metric(
         summary_rows,
         metric="nmi",
         ylabel="NMI",
         output_path=out_dir / "nmi_vs_epsilon.png",
+        methods=methods,
     )
 
     print(f"wrote {raw_path}")
     print(f"wrote {summary_path}")
     print(f"wrote {out_dir / 'max_entrywise_vs_epsilon.png'}")
     print(f"wrote {out_dir / 'nmi_vs_epsilon.png'}")
-    print_endpoint_summary(summary_rows)
+    print_endpoint_summary(summary_rows, methods)
 
 
 def run_sweep(
     run_cfg: dict,
     raw_path: Path,
+    methods: list[str],
 ) -> list[dict[str, float | int | str]]:
     rows = read_raw_rows(raw_path)
     completed = {
@@ -126,7 +124,7 @@ def run_sweep(
                 directed=True,
                 random_seed=seed,
             )
-            for method in METHODS:
+            for method in methods:
                 key = (round(float(epsilon), 10), method, repeat)
                 if key in completed:
                     continue
@@ -242,9 +240,10 @@ def plot_metric(
     metric: str,
     ylabel: str,
     output_path: Path,
+    methods: list[str],
 ) -> None:
     fig, ax = plt.subplots(figsize=(7.2, 4.8))
-    for method in METHODS:
+    for method in methods:
         rows = sorted(
             [row for row in summary_rows if row["method"] == method],
             key=lambda row: float(row["epsilon"]),
@@ -264,11 +263,11 @@ def plot_metric(
     plt.close(fig)
 
 
-def print_endpoint_summary(summary_rows: list[dict[str, float | str]]) -> None:
+def print_endpoint_summary(summary_rows: list[dict[str, float | str]], methods: list[str]) -> None:
     for epsilon in (0.0, 0.30):
         print(f"epsilon={epsilon:.2f}")
         rows = [row for row in summary_rows if float(row["epsilon"]) == epsilon]
-        for method in METHODS:
+        for method in methods:
             row = next(item for item in rows if item["method"] == method)
             print(
                 "  "

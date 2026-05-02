@@ -34,7 +34,7 @@ RANDOM_SEED = 401
 NUM_SPLITS = 1
 
 METHODS = (
-    "spectralstore_asym",
+    "spectralstore_thinking",
     "sym_svd",
     "direct_svd",
 )

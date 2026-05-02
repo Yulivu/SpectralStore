@@ -415,7 +415,7 @@ def add_theory_reference(
     theory: str,
 ) -> None:
     anchor_rows = sorted(
-        [row for row in sweep_rows if row["method"] == "spectralstore_asym"],
+        [row for row in sweep_rows if row["method"] == "spectralstore_thinking"],
         key=lambda row: float(row[x_field]),
     )
     if not anchor_rows:

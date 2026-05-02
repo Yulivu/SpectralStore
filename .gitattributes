@@ -1,0 +1,2 @@
+# Ensure shell scripts use LF on all platforms (critical for HPC Linux)
+*.sh text eol=lf

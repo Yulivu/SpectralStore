@@ -12,7 +12,6 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "src"))
 
 from spectralstore.compression import (  # noqa: E402
-    available_compressors,
     create_compressor,
     spectral_config_from_mapping,
 )
@@ -82,7 +81,7 @@ def main() -> None:
     )
     raw_sparse_bytes = _raw_sparse_csr_bytes(train_snapshots)
     ranks = list(range(args.min_rank, args.max_rank + 1, args.rank_step))
-    methods = args.methods if args.methods is not None else list(available_compressors())
+    methods = args.methods if args.methods is not None else list(config.get("methods", ["spectralstore_thinking"]))
 
     rows = []
     for rank in ranks:

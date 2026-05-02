@@ -6,7 +6,7 @@ import csv
 import gzip
 from collections import Counter
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
@@ -88,7 +88,7 @@ def _load_bitcoin_signed(
     for source, target, rating, timestamp in rows:
         if source not in node_to_idx or target not in node_to_idx:
             continue
-        month = datetime.fromtimestamp(timestamp, UTC).strftime("%Y-%m")
+        month = datetime.fromtimestamp(timestamp, timezone.utc).strftime("%Y-%m")
         weight = rating / 10.0 if normalize_ratings else rating
         monthly_edges.setdefault(month, []).append((node_to_idx[source], node_to_idx[target], weight))
 

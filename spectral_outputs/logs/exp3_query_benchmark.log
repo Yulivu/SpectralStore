@@ -1,0 +1,5 @@
+[exp3, method=spectralstore_thinking] done in 3.58s
+[exp3, method=sym_svd] done in 0.11s
+[exp3, method=direct_svd] done in 0.10s
+wrote experiments/results/exp3/query_benchmark/query_records.csv
+wrote experiments/results/exp3/query_benchmark/summary.csv

@@ -1,5 +1,10 @@
 output_dir: experiments/results/exp4/targeted_attack
 random_seed: 2026
+methods:
+  - spectralstore_thinking
+  - sym_svd
+  - direct_svd
+  - rpca_svd
 num_nodes: 1000
 num_steps: 20
 num_communities: 3

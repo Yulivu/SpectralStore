@@ -8,7 +8,6 @@ from typing import Any
 import numpy as np
 from scipy import sparse
 from scipy.special import digamma, gammaln
-from scipy.sparse.linalg import svds
 
 from spectralstore.compression.factorized_store import (
     FactorizedTemporalStore,
@@ -70,132 +69,26 @@ class SpectralCompressionConfig:
     thinking_tensor_rank: int | None = None
 
 
-class AsymmetricSpectralCompressor:
-    """First SpectralStore compressor using asymmetric split-snapshot SVD."""
+class UnifiedThinkingSpectralCompressor:
+    """Thinking-aligned compressor: mode-3 unfold + ARD + robust in a unified loop.
 
-    def __init__(self, config: SpectralCompressionConfig | None = None) -> None:
-        self.config = config or SpectralCompressionConfig()
+    Implements Stages I-III of Thinking §2.3:
 
-    def fit_transform(self, snapshots: list[ArrayLikeSnapshot]) -> FactorizedTemporalStore:
-        if self.config.sparse_native_enabled and _all_sparse_snapshots(snapshots):
-            sparse_snapshots = _as_sparse_snapshots(snapshots)
-            if len(sparse_snapshots) < 2:
-                raise ValueError("at least two temporal snapshots are required")
-            basis = _asymmetric_basis_sparse(sparse_snapshots, self.config)
-            return _factorize_from_basis(sparse_snapshots, basis, self.config)
+    - Stage I: Mode-3 tensor unfold + asymmetric triangular stitching.
+    - Stage II: Bayesian ARD rank selection via variational inference inside each
+      robust iteration.
+    - Stage III: Alternating sparse separation with hard thresholding.
 
-        dense = _as_dense_stack(snapshots)
-        if dense.shape[0] < 2:
-            raise ValueError("at least two temporal snapshots are required")
-
-        stitched = _asymmetric_basis(dense, self.config)
-        return _factorize_from_basis(dense, stitched, self.config)
-
-
-class RobustAsymmetricSpectralCompressor:
-    """Asymmetric spectral compressor with sparse residual separation."""
-
-    def __init__(self, config: SpectralCompressionConfig | None = None) -> None:
-        self.config = config or SpectralCompressionConfig()
-
-    def fit_transform(self, snapshots: list[ArrayLikeSnapshot]) -> FactorizedTemporalStore:
-        if self.config.sparse_native_enabled and _all_sparse_snapshots(snapshots):
-            sparse_snapshots = _as_sparse_snapshots(snapshots)
-            cleaned_snapshots = [snapshot.copy() for snapshot in sparse_snapshots]
-            iterations = max(1, self.config.robust_iterations)
-
-            for _ in range(iterations):
-                basis = _asymmetric_basis_sparse(cleaned_snapshots, self.config)
-                store = _factorize_from_basis(cleaned_snapshots, basis, self.config, residuals=())
-                residual_arrays = _residual_arrays_from_snapshots(sparse_snapshots, store)
-                sparse_residuals, _ = _threshold_residuals(residual_arrays, self.config)
-                cleaned_snapshots = _subtract_sparse_residuals(sparse_snapshots, sparse_residuals)
-
-            basis = _asymmetric_basis_sparse(cleaned_snapshots, self.config)
-            final_store = _factorize_from_basis(cleaned_snapshots, basis, self.config, residuals=())
-            final_residual_arrays = _residual_arrays_from_snapshots(sparse_snapshots, final_store)
-            final_residuals, diagnostics = _threshold_residuals(final_residual_arrays, self.config)
-            bound_metadata = _degree_aware_bound_metadata(
-                sparse_snapshots,
-                final_residual_arrays,
-                final_residuals,
-                self.config,
-            )
-            residual_store, storage_diagnostics = _residual_store_from_config(
-                final_residuals,
-                self.config,
-            )
-            store = FactorizedTemporalStore(
-                left=final_store.left,
-                right=final_store.right,
-                temporal=final_store.temporal,
-                lambdas=final_store.lambdas,
-                residuals=residual_store,
-                threshold_diagnostics={
-                    **diagnostics,
-                    **(final_store.threshold_diagnostics or {}),
-                    **bound_metadata["diagnostics"],
-                    **storage_diagnostics,
-                },
-                source_degree_scale=bound_metadata["source_degree_scale"],
-                target_degree_scale=bound_metadata["target_degree_scale"],
-                entrywise_bound_scale=bound_metadata["entrywise_bound_scale"],
-            )
-            return _apply_storage_gate(store, sparse_snapshots, self.config)
-
-        dense = _as_dense_stack(snapshots)
-        cleaned = dense.copy()
-        iterations = max(1, self.config.robust_iterations)
-
-        for _ in range(iterations):
-            basis = _asymmetric_basis(cleaned, self.config)
-            store = _factorize_from_basis(cleaned, basis, self.config, residuals=())
-            residual_stack = _residual_stack(dense, store)
-            sparse_residuals, _ = _threshold_residuals(residual_stack, self.config)
-            cleaned = dense - np.stack([residual.toarray() for residual in sparse_residuals])
-
-        basis = _asymmetric_basis(cleaned, self.config)
-        final_store = _factorize_from_basis(cleaned, basis, self.config, residuals=())
-        final_residual_stack = _residual_stack(dense, final_store)
-        final_residuals, diagnostics = _threshold_residuals(final_residual_stack, self.config)
-        bound_metadata = _degree_aware_bound_metadata(
-            dense,
-            final_residual_stack,
-            final_residuals,
-            self.config,
-        )
-        residual_store, storage_diagnostics = _residual_store_from_config(
-            final_residuals,
-            self.config,
-        )
-        store = FactorizedTemporalStore(
-            left=final_store.left,
-            right=final_store.right,
-            temporal=final_store.temporal,
-            lambdas=final_store.lambdas,
-            residuals=residual_store,
-            threshold_diagnostics={
-                **diagnostics,
-                **(final_store.threshold_diagnostics or {}),
-                **bound_metadata["diagnostics"],
-                **storage_diagnostics,
-            },
-            source_degree_scale=bound_metadata["source_degree_scale"],
-            target_degree_scale=bound_metadata["target_degree_scale"],
-            entrywise_bound_scale=bound_metadata["entrywise_bound_scale"],
-        )
-        return _apply_storage_gate(store, _as_sparse_snapshots(snapshots), self.config)
-
-
-class AlternatingRobustAsymmetricSpectralCompressor:
-    """Thinking-aligned alternating robust variant of the asymmetric compressor."""
+    The exact entrywise bound formula (§2.4) is populated on the resulting store
+    via ``bound_sigma_max``, ``bound_mu``, and ``bound_constant``.
+    """
 
     def __init__(self, config: SpectralCompressionConfig | None = None) -> None:
         self.config = config or SpectralCompressionConfig()
 
     def fit_transform(self, snapshots: list[ArrayLikeSnapshot]) -> FactorizedTemporalStore:
         dense = _as_dense_stack(snapshots)
-        final_state = _run_alternating_robust_asymmetric(
+        final_state = _run_unified_thinking_loop(
             dense,
             self.config,
             sparse_snapshots=_as_sparse_snapshots(snapshots),
@@ -269,124 +162,6 @@ class TensorUnfoldingSVDCompressor:
                 "target_unfolding_shape": list(target_unfolding.shape),
                 "source_unfolding_nnz": int(np.count_nonzero(source_unfolding)),
                 "target_unfolding_nnz": int(np.count_nonzero(target_unfolding)),
-            },
-        )
-
-
-class SparseUnfoldingAsymmetricCompressor:
-    """Sparse temporal-unfolding SpectralStore compressor.
-
-    This keeps the store format diagonal in components while extracting source
-    and target spaces from sparse mode unfoldings instead of from the dense
-    snapshot stack.
-    """
-
-    def __init__(self, config: SpectralCompressionConfig | None = None) -> None:
-        self.config = config or SpectralCompressionConfig()
-
-    def fit_transform(self, snapshots: list[ArrayLikeSnapshot]) -> FactorizedTemporalStore:
-        if not snapshots:
-            raise ValueError("snapshots cannot be empty")
-        sparse_snapshots = [
-            snapshot.tocsr() if sparse.issparse(snapshot) else sparse.csr_matrix(snapshot)
-            for snapshot in snapshots
-        ]
-        first_shape = sparse_snapshots[0].shape
-        if any(snapshot.shape != first_shape for snapshot in sparse_snapshots):
-            raise ValueError("all snapshots must have the same shape")
-
-        rank = min(self.config.rank, first_shape[0], first_shape[1])
-        source_unfolding = sparse.hstack(sparse_snapshots, format="csr")
-        target_unfolding = sparse.hstack(
-            [snapshot.T.tocsr() for snapshot in sparse_snapshots],
-            format="csr",
-        )
-        left = _truncated_sparse_left_singular_vectors(
-            source_unfolding,
-            rank,
-            self.config.random_seed,
-        )
-        right = _truncated_sparse_left_singular_vectors(
-            target_unfolding,
-            rank,
-            self.config.random_seed + 1,
-        )
-        temporal = _project_temporal_weights(sparse_snapshots, left, right)
-        return _store_from_tensor_factors(
-            left,
-            right,
-            temporal,
-            self.config,
-            method="sparse_unfolding_asym",
-            extra_diagnostics={
-                "source_unfolding_shape": list(source_unfolding.shape),
-                "target_unfolding_shape": list(target_unfolding.shape),
-                "source_unfolding_nnz": int(source_unfolding.nnz),
-                "target_unfolding_nnz": int(target_unfolding.nnz),
-            },
-        )
-
-
-class SplitAsymmetricUnfoldingCompressor:
-    """Split-snapshot asymmetric compressor using independent triangular means."""
-
-    def __init__(self, config: SpectralCompressionConfig | None = None) -> None:
-        self.config = config or SpectralCompressionConfig()
-
-    def fit_transform(self, snapshots: list[ArrayLikeSnapshot]) -> FactorizedTemporalStore:
-        if len(snapshots) < 2:
-            raise ValueError("at least two temporal snapshots are required")
-        sparse_snapshots = [
-            snapshot.tocsr() if sparse.issparse(snapshot) else sparse.csr_matrix(snapshot)
-            for snapshot in snapshots
-        ]
-        first_shape = sparse_snapshots[0].shape
-        if first_shape[0] != first_shape[1]:
-            raise ValueError("split asymmetric unfolding requires square snapshots")
-        if any(snapshot.shape != first_shape for snapshot in sparse_snapshots):
-            raise ValueError("all snapshots must have the same shape")
-
-        rng = np.random.default_rng(self.config.random_seed)
-        order = rng.permutation(len(sparse_snapshots))
-        split = max(1, len(sparse_snapshots) // 2)
-        first_indices = order[:split]
-        second_indices = order[split:]
-        if second_indices.size == 0:
-            second_indices = first_indices
-
-        first_mean = _mean_sparse_snapshots(sparse_snapshots, first_indices)
-        second_mean = _mean_sparse_snapshots(sparse_snapshots, second_indices)
-        stitched = _split_triangular_sparse_matrix(first_mean, second_mean)
-
-        rank_upper_bound = _rank_upper_bound(self.config, min(stitched.shape))
-        left, singular_values, right_t = _truncated_sparse_svd(
-            stitched,
-            rank_upper_bound,
-            self.config.random_seed,
-        )
-        left, right, temporal, lambdas, rank_selection_diagnostics = _factorize_svd_components(
-            sparse_snapshots,
-            left_full=left,
-            singular_values=singular_values,
-            right_t_full=right_t,
-            config=self.config,
-            rank_upper_bound=rank_upper_bound,
-        )
-
-        return FactorizedTemporalStore(
-            left=left,
-            right=right,
-            temporal=temporal,
-            lambdas=lambdas,
-            threshold_diagnostics={
-                "tensor_method": "split_asym_unfolding",
-                "requested_rank": int(self.config.rank),
-                "effective_rank": int(lambdas.shape[0]),
-                "split_first_size": int(first_indices.size),
-                "split_second_size": int(second_indices.size),
-                "stitched_shape": list(stitched.shape),
-                "stitched_nnz": int(stitched.nnz),
-                **rank_selection_diagnostics,
             },
         )
 
@@ -523,6 +298,46 @@ class RPCASVDCompressor:
         )
 
 
+class NMFCompressor:
+    """Non-negative matrix factorisation baseline (sklearn NMF on mean adjacency)."""
+
+    def __init__(self, config: SpectralCompressionConfig | None = None) -> None:
+        self.config = config or SpectralCompressionConfig()
+
+    def fit_transform(self, snapshots: list[ArrayLikeSnapshot]) -> FactorizedTemporalStore:
+        from sklearn.decomposition import NMF as SklearnNMF
+
+        dense = _as_dense_stack(snapshots)
+        rank = min(int(self.config.rank), dense.shape[1], dense.shape[2])
+        mean_adj = dense.mean(axis=0)
+        shift = abs(min(float(mean_adj.min()), 0.0))
+        nonneg = (mean_adj + shift).astype(float)
+
+        model = SklearnNMF(
+            n_components=rank,
+            init="nndsvda",
+            random_state=int(self.config.random_seed),
+            max_iter=400,
+        )
+        W = model.fit_transform(nonneg)
+        H = model.components_
+
+        temporal = _project_temporal_weights(dense, W, H.T)
+        left, right, temporal, lambdas = _normalize_tensor_components(W, H.T, temporal)
+
+        return FactorizedTemporalStore(
+            left=left,
+            right=right,
+            temporal=temporal,
+            lambdas=lambdas,
+            threshold_diagnostics={
+                "method": "nmf",
+                "requested_rank": rank,
+                "effective_rank": int(lambdas.shape[0]),
+            },
+        )
+
+
 def _as_dense_stack(snapshots: list[ArrayLikeSnapshot]) -> np.ndarray:
     if not snapshots:
         raise ValueError("snapshots cannot be empty")
@@ -618,19 +433,22 @@ def _apply_storage_gate(
         snapshots,
         factor_dtype_bytes=config.factor_storage_dtype_bytes,
     )
+    accepted_before_action = (
+        True
+        if config.max_sparse_ratio is None
+        else bool(sparse_ratio <= float(config.max_sparse_ratio))
+    )
     diagnostics = {
         **(store.threshold_diagnostics or {}),
         "storage_gate_sparse_ratio": float(sparse_ratio),
+        "storage_gate_sparse_ratio_before_action": float(sparse_ratio),
         "storage_gate_max_sparse_ratio": (
             None if config.max_sparse_ratio is None else float(config.max_sparse_ratio)
         ),
         "storage_gate_action": config.storage_gate_action,
         "storage_gate_factor_dtype_bytes": config.factor_storage_dtype_bytes,
-        "storage_gate_accepted": (
-            True
-            if config.max_sparse_ratio is None
-            else bool(sparse_ratio <= float(config.max_sparse_ratio))
-        ),
+        "storage_gate_accepted": accepted_before_action,
+        "storage_gate_accepted_before_action": accepted_before_action,
         "storage_gate_action_taken": "none",
     }
     if config.max_sparse_ratio is None or sparse_ratio <= float(config.max_sparse_ratio):
@@ -647,15 +465,15 @@ def _apply_storage_gate(
             snapshots,
             factor_dtype_bytes=config.factor_storage_dtype_bytes,
         )
+        accepted_after_action = bool(dropped_ratio <= float(config.max_sparse_ratio))
         return _copy_store_with(
             dropped,
             threshold_diagnostics={
                 **diagnostics,
                 "storage_gate_action_taken": "drop_residual",
                 "storage_gate_sparse_ratio_after_action": float(dropped_ratio),
-                "storage_gate_accepted_after_action": bool(
-                    dropped_ratio <= float(config.max_sparse_ratio)
-                ),
+                "storage_gate_accepted_after_action": accepted_after_action,
+                "storage_gate_accepted": accepted_after_action,
             },
         )
 
@@ -668,45 +486,7 @@ def _apply_storage_gate(
     )
 
 
-def _asymmetric_basis(dense: np.ndarray, config: SpectralCompressionConfig) -> np.ndarray:
-    rng = np.random.default_rng(config.random_seed)
-    stitched = np.zeros(dense.shape[1:], dtype=float)
-    num_splits = max(1, config.num_splits)
-    for _ in range(num_splits):
-        order = rng.permutation(dense.shape[0])
-        split = max(1, dense.shape[0] // 2)
-        first = dense[order[:split]].mean(axis=0)
-        second = dense[order[split:]].mean(axis=0)
-        if order[split:].size == 0:
-            second = first
-
-        split_stitched = np.triu(first) + np.tril(second, k=-1)
-        np.fill_diagonal(split_stitched, 0.5 * (np.diag(first) + np.diag(second)))
-        stitched += split_stitched
-    return stitched / num_splits
-
-
-def _asymmetric_basis_sparse(
-    sparse_snapshots: list[sparse.csr_matrix],
-    config: SpectralCompressionConfig,
-) -> np.ndarray:
-    rng = np.random.default_rng(config.random_seed)
-    stitched = sparse.csr_matrix(sparse_snapshots[0].shape, dtype=float)
-    num_splits = max(1, config.num_splits)
-    for _ in range(num_splits):
-        order = rng.permutation(len(sparse_snapshots))
-        split = max(1, len(sparse_snapshots) // 2)
-        first_indices = order[:split]
-        second_indices = order[split:]
-        if second_indices.size == 0:
-            second_indices = first_indices
-        first_mean = _mean_sparse_snapshots(sparse_snapshots, first_indices)
-        second_mean = _mean_sparse_snapshots(sparse_snapshots, second_indices)
-        stitched = stitched + _split_triangular_sparse_matrix(first_mean, second_mean)
-    return (stitched / float(num_splits)).toarray()
-
-
-def _run_alternating_robust_asymmetric(
+def _run_unified_thinking_loop(
     dense_snapshots: np.ndarray,
     config: SpectralCompressionConfig,
     *,
@@ -715,7 +495,7 @@ def _run_alternating_robust_asymmetric(
     if dense_snapshots.shape[0] < 2:
         raise ValueError("at least two temporal snapshots are required")
     if dense_snapshots.shape[1] != dense_snapshots.shape[2]:
-        raise ValueError("alternating robust asym compressor requires square snapshots")
+        raise ValueError("unified thinking compressor requires square snapshots")
 
     sparse_estimate = np.zeros_like(dense_snapshots)
     previous_low_rank_stack: np.ndarray | None = None
@@ -727,28 +507,17 @@ def _run_alternating_robust_asymmetric(
     final_sparse_residuals: tuple[sparse.csr_matrix, ...] = ()
 
     for iteration in range(1, iterations + 1):
-        clean_snapshots = dense_snapshots - sparse_estimate
-        basis, construction = _thinking_asymmetric_basis(clean_snapshots, config)
-        iteration_store = _factorize_with_iteration_state(clean_snapshots, basis, config)
+        cleaned = dense_snapshots - sparse_estimate
+
+        basis, construction = _thinking_asymmetric_basis_with_mode3(cleaned, config)
+
+        iteration_store = _factorize_with_iteration_state(cleaned, basis, config)
         low_rank_stack = _store_dense_stack(iteration_store)
         residual_stack = dense_snapshots - low_rank_stack
+
         sparse_residuals, threshold_diagnostics = _threshold_residuals(residual_stack, config)
         new_sparse_estimate = np.stack([residual.toarray() for residual in sparse_residuals])
-        sparse_store = FactorizedTemporalStore(
-            left=iteration_store.left,
-            right=iteration_store.right,
-            temporal=iteration_store.temporal,
-            lambdas=iteration_store.lambdas,
-            residuals=sparse_residuals,
-            threshold_diagnostics=iteration_store.threshold_diagnostics,
-        )
 
-        residual_bytes = int(
-            sum(
-                residual.data.nbytes + residual.indices.nbytes + residual.indptr.nbytes
-                for residual in sparse_residuals
-            )
-        )
         residual_nnz = int(sum(residual.nnz for residual in sparse_residuals))
         reconstruction_change = float(
             _stack_fro_norm(new_sparse_estimate - sparse_estimate)
@@ -777,7 +546,6 @@ def _run_alternating_robust_asymmetric(
                 "threshold_mode": str(threshold_diagnostics["mode"]),
                 "residual_nnz": residual_nnz,
                 "residual_sparsity": float(threshold_diagnostics["residual_sparsity"]),
-                "residual_bytes": residual_bytes,
                 "reconstruction_change": reconstruction_change,
                 "low_rank_change": low_rank_change,
                 "converged": converged,
@@ -789,24 +557,41 @@ def _run_alternating_robust_asymmetric(
         )
         sparse_estimate = new_sparse_estimate
         previous_low_rank_stack = low_rank_stack
-        final_store = sparse_store
+        final_store = FactorizedTemporalStore(
+            left=iteration_store.left,
+            right=iteration_store.right,
+            temporal=iteration_store.temporal,
+            lambdas=iteration_store.lambdas,
+            residuals=sparse_residuals,
+            threshold_diagnostics=iteration_store.threshold_diagnostics,
+        )
         final_low_rank_stack = low_rank_stack
         final_residual_stack = residual_stack
         final_sparse_residuals = sparse_residuals
+        if converged:
+            break
 
     assert final_store is not None
     assert final_low_rank_stack is not None
     assert final_residual_stack is not None
-    bound_metadata = _degree_aware_bound_metadata(
+
+    bound_metadata = _exact_thinking_bound_metadata(
         dense_snapshots,
+        final_low_rank_stack,
         final_residual_stack,
+        final_store,
+        config,
+    )
+
+    final_history = history[-1]
+    residual_store, storage_diagnostics = _residual_store_from_config(
         final_sparse_residuals,
         config,
     )
-    final_history = history[-1]
     threshold_diagnostics = {
-        "method_name": "spectralstore_asym_alternating_robust",
-        "robust_iterations": iterations,
+        "method_name": "spectralstore_thinking",
+        "algorithm": "unified_thinking_stages_I_III",
+        "robust_iterations": len(history),
         "threshold_scale": float(config.residual_threshold_scale),
         "convergence_tol": float(config.robust_convergence_tol),
         "split_seed": int(_asym_split_seed(config)),
@@ -815,18 +600,16 @@ def _run_alternating_robust_asymmetric(
         "construction_asymmetry_norm": final_history["construction_asymmetry_norm"],
         "output_asymmetry_norm": final_history["output_asymmetry_norm"],
         "uv_gap": final_history["uv_gap"],
-        "alternating_history": history,
-        "final_iteration": iterations,
+        "mode3_enabled": True,
+        "unified_history": history,
+        "final_iteration": len(history),
         "converged": bool(final_history["converged"]),
         "final_reconstruction_change": final_history["reconstruction_change"],
         "final_low_rank_change": final_history["low_rank_change"],
         **(final_store.threshold_diagnostics or {}),
         **bound_metadata["diagnostics"],
+        **storage_diagnostics,
     }
-    residual_store, storage_diagnostics = _residual_store_from_config(
-        final_sparse_residuals,
-        config,
-    )
     store = FactorizedTemporalStore(
         left=final_store.left,
         right=final_store.right,
@@ -837,13 +620,9 @@ def _run_alternating_robust_asymmetric(
         source_degree_scale=bound_metadata["source_degree_scale"],
         target_degree_scale=bound_metadata["target_degree_scale"],
         entrywise_bound_scale=bound_metadata["entrywise_bound_scale"],
-    )
-    store = _copy_store_with(
-        store,
-        threshold_diagnostics={
-            **(store.threshold_diagnostics or {}),
-            **storage_diagnostics,
-        },
+        bound_sigma_max=bound_metadata["bound_sigma_max"],
+        bound_mu=bound_metadata["bound_mu"],
+        bound_constant=bound_metadata["bound_constant"],
     )
     if sparse_snapshots is not None:
         store = _apply_storage_gate(store, sparse_snapshots, config)
@@ -853,11 +632,110 @@ def _run_alternating_robust_asymmetric(
     }
 
 
+def _exact_thinking_bound_metadata(
+    dense_snapshots: np.ndarray,
+    low_rank_stack: np.ndarray,
+    residual_stack: np.ndarray,
+    store: FactorizedTemporalStore,
+    config: SpectralCompressionConfig,
+) -> dict[str, Any]:
+    n = max(dense_snapshots.shape[1], 1)
+    T_snap = max(dense_snapshots.shape[0], 1)
+    degree_sum = np.zeros(dense_snapshots.shape[1], dtype=float)
+    sigma_values = []
+    for t in range(dense_snapshots.shape[0]):
+        snapshot = dense_snapshots[t]
+        residual = residual_stack[t]
+        mad = float(np.median(np.abs(residual - np.median(residual))))
+        sigma_values.append(mad / 0.6745)
+        degree_sum += np.sum(np.abs(snapshot), axis=1)
+    mean_degree = degree_sum / float(T_snap)
+    bound_mu = np.maximum(mean_degree / float(n), 1.0 / float(n))
+    sigma_max = float(np.max(sigma_values)) if sigma_values else 1e-12
+    bound_constant = float(np.clip(config.entrywise_bound_coverage, 0.5, 5.0))
+    if bound_constant <= 0.5:
+        bound_constant = 1.0
+
+    source_degree_scale = 1.0 / np.sqrt(np.maximum(bound_mu, 1e-12))
+    target_degree_scale = source_degree_scale.copy()
+    entrywise_bound_scale = 1.0
+
+    log_n = max(float(np.log(float(n))), 0.0)
+    theoretical_base = (
+        bound_constant
+        * sigma_max
+        * np.sqrt(float(store.rank) * log_n)
+        / np.sqrt(float(n * T_snap))
+    )
+
+    return {
+        "source_degree_scale": source_degree_scale,
+        "target_degree_scale": target_degree_scale,
+        "entrywise_bound_scale": entrywise_bound_scale,
+        "bound_sigma_max": sigma_max,
+        "bound_mu": bound_mu,
+        "bound_constant": bound_constant,
+        "diagnostics": {
+            "thinking_bound_sigma_max": sigma_max,
+            "thinking_bound_sigma_method": "residual_mad_per_snapshot",
+            "thinking_bound_mu_mean": float(np.mean(bound_mu)),
+            "thinking_bound_mu_min": float(np.min(bound_mu)),
+            "thinking_bound_constant": bound_constant,
+            "thinking_bound_theoretical_base": theoretical_base,
+            "thinking_bound_n": int(n),
+            "thinking_bound_T": int(T_snap),
+            "thinking_bound_rank": int(store.rank),
+            "thinking_bound_formula": "C * sigma_max * sqrt(r * log n) / sqrt(n * T)",
+        },
+    }
+
+
 def _asym_split_seed(config: SpectralCompressionConfig) -> int:
     return int(config.random_seed if config.asym_split_seed is None else config.asym_split_seed)
 
 
-def _thinking_asymmetric_basis(
+def _thinking_triangular_matrix(first_mean: np.ndarray, second_mean: np.ndarray) -> np.ndarray:
+    stitched = np.triu(first_mean, k=1) + np.tril(second_mean, k=-1)
+    np.fill_diagonal(stitched, 0.5 * (np.diag(first_mean) + np.diag(second_mean)))
+    return stitched
+
+
+def _mode3_thinking_tensor_basis(
+    dense_snapshots: np.ndarray,
+    config: SpectralCompressionConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+    n = dense_snapshots.shape[1]
+    T_snap = dense_snapshots.shape[0]
+    requested_rank = (
+        int(config.thinking_tensor_rank)
+        if config.thinking_tensor_rank is not None
+        else int(config.rank)
+    )
+    rank = max(1, min(requested_rank, n))
+    mode3 = dense_snapshots.transpose(1, 0, 2).reshape(n, n * T_snap)
+    U_full, S, Vt_full = np.linalg.svd(mode3, full_matrices=False)
+    U = U_full[:, :rank].copy()
+    Vt = Vt_full[:rank, :]
+    V_blocks = []
+    for t in range(T_snap):
+        V_blocks.append(Vt[:, t * n : (t + 1) * n].T)
+    V_avg = np.mean(np.stack(V_blocks, axis=0), axis=0)
+    U_norm, V_norm, T_proj, lambdas = _normalize_tensor_components(U, V_avg, np.ones((T_snap, rank)))
+    temporal = _project_temporal_weights_with_lambdas(dense_snapshots, U_norm, V_norm, lambdas)
+    basis = np.zeros((n, n), dtype=float)
+    for t in range(T_snap):
+        weights = lambdas * temporal[t]
+        basis += (U_norm * weights) @ V_norm.T
+    basis /= float(T_snap)
+    return basis, U_norm, V_norm, temporal, lambdas, {
+        "mode3_unfold_shape": list(mode3.shape),
+        "mode3_unfold_nnz": int(np.count_nonzero(mode3)),
+        "mode3_tensor_rank": int(rank),
+        "mode3_singular_energy_mean": float(np.mean(S[:rank])),
+    }
+
+
+def _thinking_asymmetric_basis_with_mode3(
     dense_snapshots: np.ndarray,
     config: SpectralCompressionConfig,
 ) -> tuple[np.ndarray, dict[str, Any]]:
@@ -877,7 +755,7 @@ def _thinking_asymmetric_basis(
     first_mean = dense_snapshots[first_indices].mean(axis=0)
     second_mean = dense_snapshots[second_indices].mean(axis=0)
     stitched = _thinking_triangular_matrix(first_mean, second_mean)
-    tensor_basis, tensor_diag = _thinking_tensor_basis(dense_snapshots, config)
+    tensor_basis, _, _, _, _, tensor_diag = _mode3_thinking_tensor_basis(dense_snapshots, config)
     blend = float(np.clip(config.thinking_tensor_blend, 0.0, 1.0))
     combined = (1.0 - blend) * stitched + blend * tensor_basis
     upper = np.triu(np.ones_like(stitched, dtype=bool), k=1)
@@ -891,44 +769,10 @@ def _thinking_asymmetric_basis(
         "lower_source_error": float(np.max(np.abs(combined[lower] - second_mean[lower]))),
         "diag_error": float(np.max(np.abs(np.diag(combined) - diag_target))),
         "thinking_tensor_blend": blend,
+        "mode3_enabled": True,
         **tensor_diag,
     }
     return combined, diagnostics
-
-
-def _thinking_triangular_matrix(first_mean: np.ndarray, second_mean: np.ndarray) -> np.ndarray:
-    stitched = np.triu(first_mean, k=1) + np.tril(second_mean, k=-1)
-    np.fill_diagonal(stitched, 0.5 * (np.diag(first_mean) + np.diag(second_mean)))
-    return stitched
-
-
-def _thinking_tensor_basis(
-    dense_snapshots: np.ndarray,
-    config: SpectralCompressionConfig,
-) -> tuple[np.ndarray, dict[str, Any]]:
-    n = dense_snapshots.shape[1]
-    requested_rank = (
-        int(config.thinking_tensor_rank)
-        if config.thinking_tensor_rank is not None
-        else int(config.rank)
-    )
-    rank = max(1, min(requested_rank, n))
-    source_unfolding = dense_snapshots.transpose(1, 0, 2).reshape(n, -1)
-    target_unfolding = dense_snapshots.transpose(2, 0, 1).reshape(n, -1)
-    left = _truncated_left_singular_vectors(source_unfolding, rank)
-    right = _truncated_left_singular_vectors(target_unfolding, rank)
-    temporal = _project_temporal_weights(dense_snapshots, left, right)
-    lambdas = np.sqrt(np.maximum(np.mean(temporal**2, axis=0), 1e-12))
-    normalized_temporal = temporal / np.where(lambdas > 1e-12, lambdas, 1.0)
-    tensor_basis = np.zeros((n, n), dtype=float)
-    for t in range(dense_snapshots.shape[0]):
-        weights = lambdas * normalized_temporal[t]
-        tensor_basis += (left * weights) @ right.T
-    tensor_basis /= float(dense_snapshots.shape[0])
-    return tensor_basis, {
-        "thinking_tensor_rank": int(rank),
-        "thinking_tensor_energy_mean": float(np.mean(lambdas)),
-    }
 
 
 def _factorize_with_iteration_state(
@@ -1128,12 +972,17 @@ def _select_rank_components(
             f"{int(config.ard_max_iterations)} iterations."
         )
 
-    kept_means = means[keep]
-    kept_means = np.where(np.abs(kept_means) > 1e-12, kept_means, selected_values[keep])
-    temporal = temporal_full[:, keep]
+    selected_lambdas = selected_values[keep].copy()
+    temporal = _project_temporal_weights_with_lambdas(
+        snapshots,
+        left[:, keep],
+        right[:, keep],
+        selected_lambdas,
+    )
     diagnostics = {
         "rank_selection_mode": "ard",
         "ard_model_formulation": "joint_temporal_residual_variational",
+        "ard_refit_after_selection": True,
         "requested_rank": int(config.rank),
         "rank_selection_upper_bound": int(rank_upper_bound),
         "initial_effective_rank": int(selected_values.shape[0]),
@@ -1151,10 +1000,11 @@ def _select_rank_components(
         "ard_component_raw_strengths": raw_strength.tolist(),
         "ard_component_alphas": alphas.tolist(),
         "ard_selected_indices": keep.tolist(),
-        "ard_selected_lambdas": kept_means.tolist(),
+        "ard_selected_lambdas": selected_lambdas.tolist(),
+        "ard_selected_shrunk_lambdas": means[keep].tolist(),
         "ard_elbo_history": elbo_history,
     }
-    return keep, kept_means, temporal, diagnostics, refined_left, refined_right
+    return keep, selected_lambdas, temporal, diagnostics, left, right
 
 
 def _ard_variational_shrinkage(
@@ -1445,40 +1295,6 @@ def _truncated_left_singular_vectors(matrix: np.ndarray, rank: int) -> np.ndarra
     return left_full[:, :rank]
 
 
-def _truncated_sparse_left_singular_vectors(
-    matrix: sparse.spmatrix,
-    rank: int,
-    random_seed: int,
-) -> np.ndarray:
-    left, _singular_values, _right_t = _truncated_sparse_svd(matrix, rank, random_seed)
-    return left
-
-
-def _truncated_sparse_svd(
-    matrix: sparse.spmatrix,
-    rank: int,
-    random_seed: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    rank = min(rank, min(matrix.shape))
-    if rank <= 0:
-        raise ValueError("rank must be positive")
-    if rank >= min(matrix.shape):
-        left_full, _singular_values, _right_t_full = np.linalg.svd(
-            matrix.toarray(),
-            full_matrices=False,
-        )
-        return left_full[:, :rank], _singular_values[:rank], _right_t_full[:rank]
-
-    left, singular_values, _right_t = svds(
-        matrix.astype(float),
-        k=rank,
-        which="LM",
-        random_state=random_seed,
-    )
-    order = np.argsort(-singular_values)
-    return left[:, order], singular_values[order], _right_t[order]
-
-
 def _mean_sparse_snapshots(
     snapshots: list[sparse.csr_matrix],
     indices: np.ndarray,
@@ -1489,21 +1305,6 @@ def _mean_sparse_snapshots(
     for index in indices:
         total = total + snapshots[int(index)]
     return (total / float(indices.size)).tocsr()
-
-
-def _split_triangular_sparse_matrix(
-    first_mean: sparse.spmatrix,
-    second_mean: sparse.spmatrix,
-) -> sparse.csr_matrix:
-    upper = sparse.triu(first_mean, k=1, format="csr")
-    lower = sparse.tril(second_mean, k=-1, format="csr")
-    diagonal = sparse.diags(
-        0.5 * (first_mean.diagonal() + second_mean.diagonal()),
-        offsets=0,
-        shape=first_mean.shape,
-        format="csr",
-    )
-    return (upper + lower + diagonal).tocsr()
 
 
 def _principal_component_pursuit(
@@ -1799,33 +1600,6 @@ def _normalize_cp_factors(
     return left, right, temporal
 
 
-def _residual_stack(dense_snapshots: np.ndarray, store: FactorizedTemporalStore) -> np.ndarray:
-    residuals = []
-    for t, snapshot in enumerate(dense_snapshots):
-        residuals.append(snapshot - store.dense_snapshot(t, include_residual=False))
-    return np.stack(residuals)
-
-
-def _residual_arrays_from_snapshots(
-    snapshots: list[ArrayLikeSnapshot],
-    store: FactorizedTemporalStore,
-) -> list[np.ndarray]:
-    residuals = []
-    for t, snapshot in enumerate(snapshots):
-        residuals.append(_snapshot_to_dense(snapshot) - store.dense_snapshot(t, include_residual=False))
-    return residuals
-
-
-def _subtract_sparse_residuals(
-    snapshots: list[sparse.csr_matrix],
-    residuals: tuple[sparse.csr_matrix, ...],
-) -> list[sparse.csr_matrix]:
-    return [
-        (snapshots[t] - residuals[t]).tocsr()
-        for t in range(len(snapshots))
-    ]
-
-
 def _threshold_residuals(
     residual_stack: list[np.ndarray] | np.ndarray,
     config: SpectralCompressionConfig,
@@ -1916,70 +1690,3 @@ def _adaptive_residual_threshold(
             return quantile_threshold, diagnostics
         return mad_threshold, diagnostics
     raise ValueError(f"unsupported residual_threshold_mode: {config.residual_threshold_mode}")
-
-
-def _degree_aware_bound_metadata(
-    dense_snapshots: list[ArrayLikeSnapshot] | np.ndarray,
-    residual_stack: list[np.ndarray] | np.ndarray,
-    residuals: tuple[sparse.csr_matrix, ...],
-    config: SpectralCompressionConfig,
-) -> dict[str, Any]:
-    source_degree_scale, target_degree_scale = _degree_scales(dense_snapshots)
-    edge_scale = 0.5 * (source_degree_scale[:, None] + target_degree_scale[None, :])
-    residual_arrays = [np.asarray(residual, dtype=float) for residual in residual_stack]
-    per_entry_scale_flat = []
-    for t, residual in enumerate(residual_arrays):
-        omitted_residual = residual - residuals[t].toarray()
-        per_entry_scale_flat.append(
-            (
-                np.abs(omitted_residual)
-                / np.maximum(edge_scale, 1e-12)
-            ).ravel()
-        )
-    per_entry_scale = np.concatenate(per_entry_scale_flat)
-    coverage = float(np.clip(config.entrywise_bound_coverage, 0.0, 1.0))
-    entrywise_bound_scale = float(np.quantile(per_entry_scale, coverage))
-    return {
-        "source_degree_scale": source_degree_scale,
-        "target_degree_scale": target_degree_scale,
-        "entrywise_bound_scale": entrywise_bound_scale,
-        "diagnostics": {
-            "entrywise_bound_coverage_target": coverage,
-            "degree_aware_bound_scale": entrywise_bound_scale,
-            "degree_aware_bound_scale_max": float(np.max(per_entry_scale)),
-            "source_degree_scale_mean": float(np.mean(source_degree_scale)),
-            "target_degree_scale_mean": float(np.mean(target_degree_scale)),
-            "source_degree_scale_max": float(np.max(source_degree_scale)),
-            "target_degree_scale_max": float(np.max(target_degree_scale)),
-        },
-    }
-
-
-def _degree_scales(dense_snapshots: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    if isinstance(dense_snapshots, np.ndarray):
-        weighted_degree = np.abs(dense_snapshots)
-        source_degree = weighted_degree.sum(axis=2).mean(axis=0)
-        target_degree = weighted_degree.sum(axis=1).mean(axis=0)
-    else:
-        source_degree = None
-        target_degree = None
-        for snapshot in dense_snapshots:
-            dense_snapshot = np.abs(_snapshot_to_dense(snapshot))
-            source_t = dense_snapshot.sum(axis=1)
-            target_t = dense_snapshot.sum(axis=0)
-            if source_degree is None:
-                source_degree = source_t
-                target_degree = target_t
-            else:
-                source_degree = source_degree + source_t
-                target_degree = target_degree + target_t
-        assert source_degree is not None and target_degree is not None
-        source_degree = source_degree / max(len(dense_snapshots), 1)
-        target_degree = target_degree / max(len(dense_snapshots), 1)
-    mean_degree = float(np.mean(0.5 * (source_degree + target_degree)))
-    if mean_degree <= 1e-12:
-        return np.ones_like(source_degree), np.ones_like(target_degree)
-
-    source_mu = np.maximum(source_degree / mean_degree, 1e-6)
-    target_mu = np.maximum(target_degree / mean_degree, 1e-6)
-    return 1.0 / np.sqrt(source_mu), 1.0 / np.sqrt(target_mu)

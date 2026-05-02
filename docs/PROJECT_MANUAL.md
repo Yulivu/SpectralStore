@@ -1,6 +1,6 @@
 # SpectralStore Project Manual
 
-Last updated: 2026-05-01
+Last updated: 2026-05-02
 
 This is the single engineering + planning manual for SpectralStore. It merges
 the previous status, roadmap, implementation notes, and project completion
@@ -37,13 +37,11 @@ Core package layout:
 
 Main implemented methods:
 
-- `spectralstore_asym`
-- `spectralstore_split_asym_unfolding`
-- `spectralstore_robust`
-- `spectralstore_asym_alternating_robust` (diagnostic compressor)
+- `spectralstore_thinking` (current SpectralStore method)
 - `sym_svd`
 - `direct_svd`
 - `rpca_svd`
+- `nmf`
 - tensor baselines (`tensor_unfolding_svd`, `cp_als`, `tucker_hosvd`)
 
 ## 3. Implemented System Capabilities
@@ -91,23 +89,16 @@ Main implemented methods:
 - Q3/Q4 cache helpers and cache diagnostics.
 - Q2/Q3/Q5 batch helper APIs.
 
-### 3.4 Sparse-Native Path Progress
+### 3.4 Mainline Cleanup
 
-- sparse-native mode now supported for:
-  - `spectralstore_asym`
-  - `spectralstore_robust`
-  - `sym_svd`
-  - `direct_svd`
-- sparse snapshots can bypass `_as_dense_stack` in those paths.
-- smoke outputs are now regenerated ad hoc and should be treated as run artifacts
-  instead of committed canonical directories.
-- scaling scripts/configs from the deleted `scripts/preliminary` tree are no
-  longer part of the active repository state.
-- scaling runner now emits run-status diagnostics:
-  - `dense_fallback_used`, `dense_fallback_reason`
-  - `failure_reason_category`, `failure_stage`
-  - dense stack estimate + memory guard fields (`dense_memory_guard_*`)
-  - rank-selection fields (`rank_selection_mode`, `effective_rank`, `ard_converged`, `ard_iterations`)
+- historical SpectralStore variants have been removed from the public registry:
+  `spectralstore_asym`, `spectralstore_robust`, split/unfolding, and alternating
+  diagnostic variants.
+- active experiments now use `spectralstore_thinking` plus external baselines.
+- sparse-native shortcuts remain for stable SVD baselines (`sym_svd`, `direct_svd`);
+  `spectralstore_thinking` sparse mode is deferred until it can preserve the
+  unified mechanism.
+- historical smoke outputs and result folders are run artifacts, not current evidence.
 
 ## 4. Data Coverage
 
@@ -128,7 +119,10 @@ Primary output contract:
 
 - `exp1`: `results.csv`, plots, `metrics.json`, `summary.md`, `resolved_config.yaml`, `run_metadata.json`
 - `exp2`: sweep CSV files + plots + markdown summaries
-- `exp4`: `raw_records.csv`, `summary.csv`, and robustness plots
+- `exp3`: `query_records.csv`, `summary.csv`, `metrics.json`, `summary.md`
+- `exp4`: historical robustness diagnostics (`raw_records.csv`, `summary.csv`, plots)
+- `exp4_v2`: residual anomaly/query-correction CSV summaries
+- `exp5`: ARD rank-selection and ARD diagnostic outputs
 
 Common features:
 
@@ -156,7 +150,7 @@ The project now progresses with Thinking-theory-first priorities:
 
 1. implement a unified offline loop for asym + tensor + ARD + robust,
 2. tighten theoretical consistency before broad engineering expansion,
-3. run reproducible fixed-vs-ARD and NoAsym/NoRobust ablations as default evidence,
+3. run reproducible fixed-vs-ARD and targeted mechanism ablations as explicit evidence,
 4. iterate mechanisms directly when metrics fail instead of pausing by gate policy.
 
 Current phase summary:
@@ -165,7 +159,8 @@ Current phase summary:
 - Phase 1 (store/query contracts): completed.
 - Phase 2 (query latency/index tradeoff): completed with benchmark outputs.
 - Phase 3 (real-data residual calibration + storage gate): completed.
-- Asym mechanism diagnostics: executed and retained as baseline evidence for new theory-aligned iterations.
+- Historical asym/robust diagnostics: retained only in notes; old implementations
+  and result folders are not current evidence.
 
 ## 8. Minimal Operations Runbook
 
@@ -183,15 +178,24 @@ python scripts/exp1/run_exp1_theory_validation.py --config experiments/configs/e
 python scripts/exp2/run_bitcoin_compression_ratio_sweep.py --config experiments/configs/exp2/bitcoin_sweep.yaml
 python scripts/exp2/run_bitcoin_compression_ratio_sweep_rmse.py --config experiments/configs/exp2/bitcoin_sweep_rmse.yaml
 python scripts/exp2/run_bitcoin_residual_boundary_sweep.py --config experiments/configs/exp2/bitcoin_residual_boundary.yaml
+python scripts/exp3/run_query_benchmark.py --config experiments/configs/exp3/query_benchmark.yaml
+python scripts/exp4_v2/run_residual_query_robustness.py --config experiments/configs/exp4_v2/residual_query_robustness.yaml
 python scripts/exp4/run_synthetic_attack_random.py --config experiments/configs/exp4/random_attack.yaml
 python scripts/exp4/run_synthetic_attack_targeted.py --config experiments/configs/exp4/targeted_attack.yaml
+python scripts/exp4/run_synthetic_attack_injection.py --config experiments/configs/exp4/injection_attack.yaml
+python scripts/exp5/run_ard_diagnostic.py --config experiments/configs/exp5/ard_diagnostic.yaml
+python scripts/exp5/run_ard_rank_selection.py --config experiments/configs/exp5/ard_rank_selection.yaml
 ```
+
+AutoDL/HPC setup details are in [docs/AUTODL_RUNBOOK.md](AUTODL_RUNBOOK.md).
 
 HPC long-run pattern:
 
 ```bash
 screen -S spectralstore
-python scripts/exp1/run_exp1_theory_validation.py --config experiments/configs/exp1/theory_validation.yaml > /root/autodl-tmp/spectral_outputs/exp1.log 2>&1
+export SPECTRAL_OUTPUT_DIR=/root/autodl-tmp/spectral_outputs
+bash scripts/hpc/run_system_direction.sh
+bash scripts/hpc/run_all_mainline.sh
 ```
 
 ## 9. Baseline Policy
@@ -210,8 +214,9 @@ Current baseline strategy:
 
 ## 11. Rerun Policy After Mechanism Changes
 
-- rerun the core matrix (`exp1`, `exp2`, `exp4`) whenever the compressor mechanism changes materially.
-- keep old result directories as historical diagnostics only; do not use them as final evidence.
+- rerun the system-direction matrix (`exp3`, `exp4_v2`, `exp5/ard_diagnostic`) when evaluating the current A-D route.
+- rerun the historical core matrix (`exp1`, `exp2`, `exp4`, `exp5`) whenever the compressor mechanism changes materially.
+- delete or archive old result directories before publication-facing reruns; do not use them as final evidence.
 - keep claims split by evidence type:
   - system evidence from reproducible pipeline and outputs,
   - method evidence from rerun matrix metrics,

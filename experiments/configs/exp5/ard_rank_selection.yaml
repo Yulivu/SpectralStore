@@ -1,0 +1,24 @@
+output_dir: experiments/results/exp5/mainline
+random_seed: 2026
+num_repeats: 5
+
+sbm:
+  n_values: [500, 1000]
+  t_values: [10, 20]
+  num_communities: 5
+  p_in: 0.20
+  p_out: 0.05
+  true_rank_values: [5, 10]
+
+ard:
+  max_rank: 15
+  prior_alpha: 1e-2
+  prior_beta: 1.0
+  max_iterations: 100
+  tolerance: 1e-6
+  min_effective_ratio: 0.05
+
+collab:
+  root: dataset
+  candidate_ranks: [5, 10, 15, 20, 30, 50]
+  test_fraction: 0.10

@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 
 
 METHOD_LABELS = {
-    "spectralstore_asym": "asym",
+    "spectralstore_thinking": "SpectralStore",
     "sym_svd": "sym_svd",
     "direct_svd": "direct_svd",
     "tensor_unfolding_svd": "tensor_unfolding_svd",

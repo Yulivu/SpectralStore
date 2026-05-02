@@ -5,18 +5,15 @@ from spectralstore.compression.factorized_store import (
     TemporalCOOResidualStore,
 )
 from spectralstore.compression.spectral import (
-    AlternatingRobustAsymmetricSpectralCompressor,
-    AsymmetricSpectralCompressor,
     CPALSCompressor,
     DirectSVDCompressor,
+    NMFCompressor,
     RPCASVDCompressor,
-    RobustAsymmetricSpectralCompressor,
-    SplitAsymmetricUnfoldingCompressor,
-    SparseUnfoldingAsymmetricCompressor,
     SpectralCompressionConfig,
     SymmetricSVDCompressor,
     TensorUnfoldingSVDCompressor,
     TuckerHOSVDCompressor,
+    UnifiedThinkingSpectralCompressor,
 )
 from spectralstore.compression.registry import (
     COMPRESSOR_REGISTRY,
@@ -27,22 +24,19 @@ from spectralstore.compression.registry import (
 )
 
 __all__ = [
-    "AsymmetricSpectralCompressor",
-    "AlternatingRobustAsymmetricSpectralCompressor",
     "COMPRESSOR_REGISTRY",
     "CPALSCompressor",
     "DirectSVDCompressor",
     "FactorizedTemporalStore",
+    "NMFCompressor",
     "PROTOTYPE_COMPRESSORS",
     "RPCASVDCompressor",
-    "RobustAsymmetricSpectralCompressor",
-    "SplitAsymmetricUnfoldingCompressor",
-    "SparseUnfoldingAsymmetricCompressor",
     "SpectralCompressionConfig",
     "SymmetricSVDCompressor",
     "TemporalCOOResidualStore",
     "TensorUnfoldingSVDCompressor",
     "TuckerHOSVDCompressor",
+    "UnifiedThinkingSpectralCompressor",
     "available_compressors",
     "create_compressor",
     "spectral_config_from_mapping",
